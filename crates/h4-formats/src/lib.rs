@@ -9,6 +9,7 @@ pub mod archive;
 pub mod catalog;
 pub mod png;
 pub mod sprite;
+pub mod terrain;
 
 mod reader;
 
