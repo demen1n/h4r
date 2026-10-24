@@ -65,9 +65,9 @@ u8 m, m × { u8 road, u16 id (9 бит), u8 mask_set (5 бит) }               
 Имена полей — из геттеров `t_abstract_tile` / `t_terrain_transition` / `t_road_transition` в мапе (`get_road_type`, `get_rock_terrain_type`, `has_rock_terrain_transition`, `get_visibility`, `get_id`, `get_mask_set`). В памяти тайл упакован в u32: terrain 5 бит, subtype 1, road 2, rock 2, флаг 1, visibility выше.
 
 - Enum земли (таблица rva `5958d8`): water, grass, rough, swamp, volcanic, snow, sand, dirt, subterranean, river, lava, ice, special_all/life/order/death/chaos/nature/combat. river/lava/ice — это реки (`terrain.river.water|lava|ice.*`), special_* — магические земли (`terrain.magic.*`).
-- **Переходы сохранены в карте** (их считает редактор): id ≤ 92 (93 маски в наборе, т.е. это индекс маски, а не код), mask_set ≤ 19 (в `transition.Transitions` наборов 15 — соответствие не выяснено).
+- **Переходы сохранены в карте** (их считает редактор): id ≤ 92 — индекс маски в наборе в порядке файла, mask_set 0–19 — номер в таблице exe `6877a0`, 20 слотов на 4 имени наборов (см. `terrain_draw.md`).
 - visibility: у всех тайлов всех карт биты выше 17 равны ровно 0x80000. На этом построена проверка, которая убирает ложные стартовые смещения у 3 карт. Гипотеза: 6 игроков × 3 бита видимости.
-- Типы дорог 1–3 соответствуют dirt/gravel/cobblestone — это гипотеза, с игрой не сверено.
+- Дороги: 1 — gravel, 2 — dirt, 3 — cobblestone (порядок массива текстур дорог в exe, rva `58ca68`; см. `terrain_draw.md`).
 
 ## Проверено
 

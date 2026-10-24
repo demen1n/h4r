@@ -8,12 +8,18 @@
 //! Where terrains meet, the higher-priority one is drawn over the edge of the lower tile
 //! through a transition mask (see `h4_formats::transition`). Land over water uses the soft
 //! 4-bit "land_to_water" masks, which makes the shoreline.
+//!
+//! The generated test map works out those masks itself ([`TerrainView::build`]). A real map
+//! from a `.h4c` file already has them, chosen by the map editor, so [`TerrainView::build_map`]
+//! just draws what each tile lists, the way the game's tile drawer does (`FUN_0078a750` for
+//! terrain, `FUN_0078aad0` for roads; see `decomp/terrain_draw.md`).
 
 use std::collections::HashMap;
 
 use h4_formats::archive::Resources;
+use h4_formats::map::MapFile;
 use h4_formats::terrain::{Metatile, METATILE_SIZE, TILE_HEIGHT, TILE_WIDTH};
-use h4_formats::transition::{corner_code, Neighbours, Transitions};
+use h4_formats::transition::{corner_code, Mask, Neighbours, Transitions};
 use macroquad::prelude::*;
 
 use crate::world::{Pos, Road, Terrain, World};
@@ -62,35 +68,25 @@ impl Iso {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum Key {
-    /// terrain, texture set (0/1), which of the set's two metatiles (0/1)
-    Terrain(Terrain, u8, u8),
-    Road(Road, u8),
-}
-
-/// Metatiles loaded on first use.
+/// Metatiles loaded on first use, by resource name (`terrain.grass.1.2.h4d`).
 struct Metatiles<'a> {
     res: &'a Resources,
-    loaded: HashMap<Key, Metatile>,
+    loaded: HashMap<String, Metatile>,
 }
 
 impl Metatiles<'_> {
-    fn get(&mut self, key: Key) -> Result<&Metatile, String> {
-        if !self.loaded.contains_key(&key) {
-            let name = match key {
-                Key::Terrain(t, set, alt) => format!("terrain.{}.{}.{}.h4d", t.resource_name(), set + 1, alt + 1),
-                Key::Road(r, alt) => format!("terrain.road.{}.{}.h4d", r.resource_name(), alt + 1),
-            };
-            let m = self.res.read(&name).and_then(|d| Metatile::read(&d)).map_err(|e| format!("{name}: {e}"))?;
-            self.loaded.insert(key, m);
+    fn get(&mut self, name: &str) -> Result<&Metatile, String> {
+        if !self.loaded.contains_key(name) {
+            let m = self.res.read(name).and_then(|d| Metatile::read(&d)).map_err(|e| format!("{name}: {e}"))?;
+            self.loaded.insert(name.to_string(), m);
         }
-        Ok(&self.loaded[&key])
+        Ok(&self.loaded[name])
     }
 
     /// One map tile of a terrain (or road) as a 64x32 RGBA picture, put together from the
-    /// four metatiles that overlap at that spot. `key` picks the metatile for each of them.
-    fn tile(&mut self, p: Pos, key: impl Fn(u8) -> Key) -> Result<Vec<u8>, String> {
+    /// four metatiles that overlap at that spot. `name(alt)` is the resource name of the
+    /// set's first (`alt` 0) or second metatile.
+    fn tile(&mut self, p: Pos, name: impl Fn(u8) -> String) -> Result<Vec<u8>, String> {
         let mut buf = vec![0u8; TILE_BYTES];
         // metatile anchors (multiples of STEP) whose 10x10 area contains this tile
         let anchors = |v: i32| {
@@ -104,11 +100,55 @@ impl Metatiles<'_> {
                 if r >= METATILE_SIZE || c >= METATILE_SIZE {
                     continue;
                 }
-                let m = self.get(key(alt))?;
+                let m = self.get(&name(alt))?;
                 m.draw_tile(m.tile(r, c), &mut buf, TILE_WIDTH, 0, 0);
             }
         }
         Ok(buf)
+    }
+
+    /// A tile of a terrain that has a single picture instead of a metatile pair (magic
+    /// all/life/order). The game doesn't overlap these: it splits the map into 4x4 blocks and
+    /// fills each block from the middle 4x4 tiles (3..=6) of the one picture
+    /// (`FUN_0078b0d0`, rva `38b0d0`).
+    fn single_tile(&mut self, p: Pos, name: &str) -> Result<Vec<u8>, String> {
+        let mut buf = vec![0u8; TILE_BYTES];
+        let m = self.get(name)?;
+        let (r, c) = (p.row.rem_euclid(4) as usize + 3, p.col.rem_euclid(4) as usize + 3);
+        m.draw_tile(m.tile(r, c), &mut buf, TILE_WIDTH, 0, 0);
+        Ok(buf)
+    }
+
+    /// The picture of a tile of the game's terrain `terrain` (index into
+    /// `h4_formats::map::TERRAIN_NAMES`) and `subtype`.
+    fn map_terrain(&mut self, p: Pos, terrain: u8, subtype: u8) -> Result<Vec<u8>, String> {
+        // Resource names from the texture tables of the exe (rva 397b70 and its neighbours).
+        // The terrains with two looks have `<name>.<subtype>.<alt>`, the others `<name>.<alt>`.
+        let pair = |base: String| move |alt: u8| format!("terrain.{base}.{}.h4d", alt + 1);
+        match terrain {
+            0..=8 => {
+                // water, grass, rough, swamp, volcanic, snow, sand, dirt, subterranean
+                let names = ["water", "grass", "rough", "swamp", "lava", "snow", "sand", "dirt", "subterranean"];
+                self.tile(p, pair(format!("{}.{}", names[terrain as usize], subtype + 1)))
+            }
+            9 => self.tile(p, pair("river.water".into())),
+            10 => self.tile(p, pair("river.lava".into())),
+            11 => self.tile(p, pair("river.ice".into())),
+            12 => self.single_tile(p, "terrain.magic.all.h4d"),
+            13 => self.single_tile(p, "terrain.magic.life.h4d"),
+            14 => self.single_tile(p, "terrain.magic.order.h4d"),
+            15 => self.tile(p, pair("magic.death".into())),
+            16 => self.tile(p, pair("magic.chaos".into())),
+            17 => self.tile(p, pair("magic.nature".into())),
+            18 => self.tile(p, pair("special.personal_combat".into())),
+            t => Err(format!("unknown terrain {t}")),
+        }
+    }
+
+    /// A tile of road type 1..=3 as stored in maps.
+    fn map_road(&mut self, p: Pos, road: u8) -> Result<Vec<u8>, String> {
+        let road = Road::from_map(road).ok_or_else(|| format!("unknown road {road}"))?;
+        self.tile(p, |alt| road_name(road, alt))
     }
 }
 
@@ -133,6 +173,15 @@ fn blend(canvas: &mut [u8], width: usize, x: i32, y: i32, tile: &[u8], coverage:
             dst[3] = dst[3].max(a as u8);
         }
     }
+}
+
+/// Resource name of one metatile of a terrain of the generated map.
+fn terrain_name(t: Terrain, set: u8, alt: u8) -> String {
+    format!("terrain.{}.{}.{}.h4d", t.resource_name(), set + 1, alt + 1)
+}
+
+fn road_name(road: Road, alt: u8) -> String {
+    format!("terrain.road.{}.{}.h4d", road.resource_name(), alt + 1)
 }
 
 /// Terrain plus texture set, like the game's `t_full_terrain_type` (type + subtype): the two
@@ -195,7 +244,7 @@ impl TerrainView {
                 let (x, y) = iso.tile_corner(p);
 
                 // the tile's own terrain
-                let base = metatiles.tile(p, |alt| Key::Terrain(here.terrain, here.set, alt))?;
+                let base = metatiles.tile(p, |alt| terrain_name(here.terrain, here.set, alt))?;
                 blend(&mut canvas, width, x, y, &base, |_, _| 255);
 
                 // higher terrains around it spill over its edges, lowest first
@@ -221,17 +270,81 @@ impl TerrainView {
                         _ => format!("land {}", 1 + tile_hash(p) % 3),
                     };
                     let Some(mask) = transitions.mask(&set, code) else { continue };
-                    let texture = metatiles.tile(p, |alt| Key::Terrain(t.0, t.1, alt))?;
+                    let texture = metatiles.tile(p, |alt| terrain_name(t.0, t.1, alt))?;
                     blend(&mut canvas, width, x, y, &texture, |mx, my| mask.alpha(mx, my));
                 }
 
                 if let Some(road) = here.road {
-                    let texture = metatiles.tile(p, |alt| Key::Road(road, alt))?;
+                    let texture = metatiles.tile(p, |alt| road_name(road, alt))?;
                     blend(&mut canvas, width, x, y, &texture, |_, _| 255);
                 }
             }
         }
 
+        Ok(TerrainView::from_canvas(&canvas, iso))
+    }
+
+    /// Draw one level of a real map by the transitions stored in its tiles. Tiles outside the
+    /// map's diamond aren't drawn.
+    pub fn build_map(res: &Resources, map: &MapFile, level: usize, iso: &Iso) -> Result<TerrainView, String> {
+        let transitions = res
+            .read("transition.Transitions.h4d")
+            .and_then(|d| Transitions::read(&d))
+            .map_err(|e| format!("transitions: {e}"))?;
+        let mask = |set: u8, id: u16| transitions.map_mask(set, id).ok_or_else(|| format!("no mask {id} in mask set {set}"));
+        let mut metatiles = Metatiles { res, loaded: HashMap::new() };
+        let width = iso.width as usize;
+        let mut canvas = vec![0u8; 4 * width * iso.height as usize];
+        let size = map.header.size as i32;
+
+        for row in 0..size {
+            for col in 0..size {
+                let Some(tile) = map.tile(level, row as usize, col as usize) else { continue };
+                let p = Pos { col, row };
+                let (x, y) = iso.tile_corner(p);
+
+                // the tile's own terrain, then the neighbours' edges in the stored order
+                let base = metatiles.map_terrain(p, tile.terrain, tile.subtype)?;
+                blend(&mut canvas, width, x, y, &base, |_, _| 255);
+                for t in &tile.terrain_transitions {
+                    let m = mask(t.mask_set, t.id)?;
+                    let texture = metatiles.map_terrain(p, t.terrain, t.subtype)?;
+                    blend(&mut canvas, width, x, y, &texture, |mx, my| m.alpha(mx, my));
+                }
+
+                if tile.road == 0 {
+                    // a road next door spills over this tile's edge
+                    for t in &tile.road_transitions {
+                        let m = mask(t.mask_set, t.id)?;
+                        let texture = metatiles.map_road(p, t.road)?;
+                        blend(&mut canvas, width, x, y, &texture, |mx, my| m.alpha(mx, my));
+                    }
+                } else {
+                    // The tile's own road. Transitions with road 0 cut its edge away where the
+                    // road ends; transitions with another road type paint that road over it.
+                    // As in the game, the cut applies to the finished picture.
+                    let mut road = metatiles.map_road(p, tile.road)?;
+                    let mut cuts: Vec<&Mask> = Vec::new();
+                    for t in &tile.road_transitions {
+                        let m = mask(t.mask_set, t.id)?;
+                        if t.road == 0 {
+                            cuts.push(m);
+                        } else {
+                            let other = metatiles.map_road(p, t.road)?;
+                            blend(&mut road, TILE_WIDTH, 0, 0, &other, |mx, my| m.alpha(mx, my));
+                        }
+                    }
+                    let kept = |mx: usize, my: usize| if cuts.iter().any(|m| m.alpha(mx, my) != 0) { 0 } else { 255 };
+                    blend(&mut canvas, width, x, y, &road, kept);
+                }
+            }
+        }
+        Ok(TerrainView::from_canvas(&canvas, iso))
+    }
+
+    /// Cut the finished picture of the map into GPU textures.
+    fn from_canvas(canvas: &[u8], iso: &Iso) -> TerrainView {
+        let width = iso.width as usize;
         let mut chunks = Vec::new();
         for cy in (0..iso.height).step_by(CHUNK as usize) {
             for cx in (0..iso.width).step_by(CHUNK as usize) {
@@ -247,7 +360,7 @@ impl TerrainView {
                 chunks.push((vec2(cx as f32, cy as f32), t));
             }
         }
-        Ok(TerrainView { chunks })
+        TerrainView { chunks }
     }
 
     pub fn draw(&self, camera: &crate::Camera) {

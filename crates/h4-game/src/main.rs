@@ -163,16 +163,18 @@ async fn main() {
         let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
         h4_formats::map::MapFile::read(&bytes, &path).unwrap_or_else(|e| panic!("{e}"))
     });
+    let level = std::env::var("H4_LEVEL").ok().and_then(|l| l.parse().ok()).unwrap_or(0);
     let mut world = match &real_map {
-        Some(map) => {
-            let level = std::env::var("H4_LEVEL").ok().and_then(|l| l.parse().ok()).unwrap_or(0);
-            let level = level.min(map.header.levels as usize - 1);
-            World::from_map(map, level)
-        }
+        Some(map) => World::from_map(map, level.min(map.header.levels as usize - 1)),
         None => World::generate(40, 40),
     };
     let iso = Iso::new(&world);
-    let terrain = match TerrainView::build(&res, &world, &iso) {
+    // a real map is drawn by the transitions stored in it, the test map works them out
+    let terrain = match &real_map {
+        Some(map) => TerrainView::build_map(&res, map, level.min(map.header.levels as usize - 1), &iso),
+        None => TerrainView::build(&res, &world, &iso),
+    };
+    let terrain = match terrain {
         Ok(t) => t,
         Err(e) => {
             eprintln!("terrain: {e}");
@@ -189,7 +191,12 @@ async fn main() {
     let mut creatures = Vec::new();
     if real_map.is_some() {
         // creatures of a real map come with its objects, which aren't read yet
-        let start = world.passable_near_center().unwrap_or(Pos { col: 0, row: 0 });
+        // H4_START=col,row puts the hero (and so the first screenshot) at a chosen tile
+        let chosen = std::env::var("H4_START").ok().and_then(|s| {
+            let (col, row) = s.split_once(',')?;
+            Some(Pos { col: col.trim().parse().ok()?, row: row.trim().parse().ok()? })
+        });
+        let start = chosen.or_else(|| world.passable_near_center()).unwrap_or(Pos { col: 0, row: 0 });
         hero = spawn(HERO, start.col, start.row, "e");
     } else {
         hero = spawn(HERO, 3, 36, "e");
