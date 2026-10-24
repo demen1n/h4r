@@ -9,6 +9,7 @@
 //! (bottom - top) rows of: u16 x0, u16 x1 (relative to left), u32 offset into pixels
 //! N bytes of palette indices, N = last row's offset + width
 //! if alpha depth >= 4: (N + 1) / 2 bytes of 4-bit alpha, even pixel in the low nibble
+//! if alpha depth == 1: no alpha bytes; palette index 0 is transparent (a colour key)
 //!     and if has_block_alpha: (N + 131) / 128 more bytes (per-128-pixel flags; unused here)
 //! ```
 //!
@@ -75,6 +76,10 @@ pub struct Layer {
     pixels: Vec<u8>,
     /// 4-bit alpha per pixel, two pixels per byte; empty means opaque.
     alpha: Vec<u8>,
+    /// 1-bit layers have no alpha bytes: pixels with palette index 0 are see-through.
+    /// (Found on the data: in the animated flags of `Quest Guard` 955 of 1286 pixels are
+    /// index 0, a near-black that the game obviously doesn't draw.)
+    index0_transparent: bool,
 }
 
 impl Layer {
@@ -112,7 +117,8 @@ impl Layer {
                 r.take((n + 131) / 128)?;
             }
         }
-        Ok(Layer { name, rect, palette, rows, pixels, alpha })
+        let index0_transparent = alpha_depth == 1;
+        Ok(Layer { name, rect, palette, rows, pixels, alpha, index0_transparent })
     }
 
     pub fn is_empty(&self) -> bool {
@@ -141,7 +147,9 @@ impl Layer {
                     continue;
                 }
                 let k = row.offset as usize + i;
-                let a = if self.alpha.is_empty() {
+                let a = if self.index0_transparent && self.pixels[k] == 0 {
+                    0
+                } else if self.alpha.is_empty() {
                     255
                 } else {
                     ((self.alpha[k / 2] >> (4 * (k & 1))) & 15) as u32 * 17
