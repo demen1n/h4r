@@ -81,9 +81,10 @@ fn map_objects(res: &Resources, world: &mut World, map: &h4_formats::map::MapFil
         }
         let kind = kinds.entry(p.model.as_str()).or_insert_with(|| ObjectKind::load(res, &p.model).map(Rc::new));
         let Some(kind) = kind else { continue };
-        // the stored x is our column, y our row (checked on screenshots: roads lead to the
-        // entrances of towns and mines)
-        let at = Pos { col: o.x, row: o.y };
+        // the stored x is our row, y our column. Checked on all maps of the installation:
+        // this way 77% of sand decorations stand on sand and bridges mostly on water,
+        // the other way round only 27% and mostly on grass.
+        let at = Pos { col: o.y, row: o.x };
         for (cell, blocked) in kind.cells(at) {
             if world.contains(cell) {
                 world.take(cell, blocked);
