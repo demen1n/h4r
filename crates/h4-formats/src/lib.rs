@@ -5,11 +5,14 @@
 //! - [`sprite`]: paletted sprite layers (`t_bitmap_layer_24`), bitmap groups and actor sequences.
 //! - [`catalog`]: actors and their animations by action and direction.
 //! - [`terrain`]: terrain metatiles; [`transition`]: masks for edges between terrains.
+//! - [`map`]: adventure maps (`.h4c`): header and tiles; [`cp1251`]: Russian text.
 //! - [`png`]: a minimal RGBA PNG writer for dumping decoded images.
 
 pub mod adv_actor;
 pub mod archive;
 pub mod catalog;
+pub mod cp1251;
+pub mod map;
 pub mod png;
 pub mod sprite;
 pub mod terrain;
