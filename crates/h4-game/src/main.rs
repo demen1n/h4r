@@ -68,9 +68,12 @@ enum Upright<'a> {
 /// down as they are (no check for free cells: the map maker already arranged them), and
 /// their cells are marked taken / blocked for the path finder.
 fn map_objects(res: &Resources, world: &mut World, map: &h4_formats::map::MapFile, level: usize) -> Vec<Placed> {
-    let Ok(body) = &map.body else {
-        eprintln!("objects not shown: {}", map.body.as_ref().err().unwrap());
-        return Vec::new();
+    let body = match &map.body {
+        Ok(body) => body,
+        Err(e) => {
+            eprintln!("objects not shown: {e}");
+            return Vec::new();
+        }
     };
     let mut kinds: HashMap<&str, Option<Rc<ObjectKind>>> = HashMap::new();
     let mut placed = Vec::new();

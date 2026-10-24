@@ -63,15 +63,15 @@ impl<'a> Reader<'a> {
     }
 
     pub fn u16(&mut self) -> Result<u16> {
-        Ok(u16::from_le_bytes(self.take(2)?.try_into().unwrap()))
+        Ok(u16::from_le_bytes(self.take(2)?.try_into().expect("take(2) returns exactly 2 bytes")))
     }
 
     pub fn u32(&mut self) -> Result<u32> {
-        Ok(u32::from_le_bytes(self.take(4)?.try_into().unwrap()))
+        Ok(u32::from_le_bytes(self.take(4)?.try_into().expect("take(4) returns exactly 4 bytes")))
     }
 
     pub fn i32(&mut self) -> Result<i32> {
-        Ok(i32::from_le_bytes(self.take(4)?.try_into().unwrap()))
+        Ok(i32::from_le_bytes(self.take(4)?.try_into().expect("take(4) returns exactly 4 bytes")))
     }
 
     /// u16 length followed by that many single-byte characters (Latin-1/cp1251).

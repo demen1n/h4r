@@ -53,7 +53,7 @@ impl Archive {
         if &head[..4] != b"H4R\x05" {
             return bad(format!("{} is not an .h4r archive", path.display()));
         }
-        let dir_offset = u32::from_le_bytes(head[4..8].try_into().unwrap()) as u64;
+        let dir_offset = u32::from_le_bytes(head[4..8].try_into().expect("a 4-byte slice")) as u64;
         let mut dir = Vec::new();
         file.seek(SeekFrom::Start(dir_offset))?;
         file.read_to_end(&mut dir)?;
@@ -73,7 +73,9 @@ impl Archive {
     pub fn read(&self, e: &Entry) -> Result<Vec<u8>> {
         let mut blob = vec![0u8; e.compressed_size as usize];
         {
-            let mut f = self.file.lock().unwrap();
+            // The lock only fails if another thread panicked while holding it; then the file
+            // position is unknown and stopping is the right thing.
+            let mut f = self.file.lock().expect("another thread panicked while reading the archive");
             f.seek(SeekFrom::Start(e.offset as u64))?;
             f.read_exact(&mut blob)?;
         }

@@ -13,8 +13,8 @@ pub fn encode_rgba(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
         raw.extend_from_slice(row);
     }
     let mut z = ZlibEncoder::new(Vec::new(), Compression::default());
-    z.write_all(&raw).unwrap();
-    let idat = z.finish().unwrap();
+    z.write_all(&raw).expect("compressing into a Vec in memory cannot fail");
+    let idat = z.finish().expect("compressing into a Vec in memory cannot fail");
 
     let mut ihdr = Vec::with_capacity(13);
     ihdr.extend_from_slice(&width.to_be_bytes());
