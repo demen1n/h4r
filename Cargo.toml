@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = ["crates/h4-formats", "crates/h4-viewer"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+
+[profile.dev.package."*"]
+# decoding sprites is slow in debug builds otherwise
+opt-level = 2

@@ -1,0 +1,6 @@
+/target
+/.venv
+/bin
+/ghidra
+/extracted
+/third_party
