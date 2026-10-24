@@ -6,6 +6,7 @@
 //! - [`catalog`]: actors and their animations by action and direction.
 //! - [`terrain`]: terrain metatiles; [`transition`]: masks for edges between terrains.
 //! - [`map`]: adventure maps (`.h4c`): header and tiles; [`cp1251`]: Russian text.
+//! - [`table`]: spreadsheet-like game tables (`table.*.h4d`: creatures, spells, ...).
 //! - [`png`]: a minimal RGBA PNG writer for dumping decoded images.
 
 pub mod adv_actor;
@@ -16,6 +17,7 @@ pub mod cp1251;
 pub mod map;
 pub mod png;
 pub mod sprite;
+pub mod table;
 pub mod terrain;
 pub mod transition;
 
