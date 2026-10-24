@@ -267,7 +267,9 @@ async fn main() {
     let show_footprints = std::env::var("H4_FOOTPRINTS").is_ok();
     let mut time = 0.0;
 
-    let mut camera = Camera { pos: Vec2::ZERO, zoom: 1.0 };
+    // One game pixel per screen point, like the original in a window: on a Retina screen
+    // that is 2x2 physical pixels. At zoom 1 everything looked half the size and too sharp.
+    let mut camera = Camera { pos: Vec2::ZERO, zoom: screen_dpi_scale() };
     camera.center_on(hero.feet(&iso));
     // H4_OVERVIEW=1: start zoomed out over the whole map (handy with H4_SCREENSHOT)
     if std::env::var("H4_OVERVIEW").is_ok() {
@@ -319,7 +321,7 @@ async fn main() {
         if zoom_by != 1.0 {
             // keep the map point under the mouse in place
             let anchor = camera.to_map(mouse);
-            camera.zoom = (camera.zoom * zoom_by).clamp(0.4, 3.0);
+            camera.zoom = (camera.zoom * zoom_by).clamp(0.4, 4.0);
             camera.pos = anchor - mouse / camera.zoom;
         }
         if is_key_pressed(KeyCode::Space) {

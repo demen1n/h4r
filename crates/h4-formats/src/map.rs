@@ -196,6 +196,19 @@ impl MapFile {
         let before: usize = ranges[..row].iter().map(|(s, e)| e - s).sum();
         self.tiles.get(level * per_level + before + column - start)
     }
+
+    /// The height of vertex (`row`, `column`) of `level`: the top corner of tile
+    /// (`row`, `column`). `None` outside the map.
+    pub fn height(&self, level: usize, row: usize, column: usize) -> Option<u8> {
+        let ranges = vertex_row_ranges(self.header.size as usize);
+        let per_level: usize = ranges.iter().map(|(s, e)| e - s).sum();
+        let (start, end) = *ranges.get(row)?;
+        if column < start || column >= end {
+            return None;
+        }
+        let before: usize = ranges[..row].iter().map(|(s, e)| e - s).sum();
+        self.heights.get(level * per_level + before + column - start).copied()
+    }
 }
 
 fn context(e: Error, name: &str) -> Error {

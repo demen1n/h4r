@@ -339,6 +339,7 @@ impl TerrainView {
                 }
             }
         }
+        shade_by_height(&mut canvas, width, map, level, iso);
         Ok(TerrainView::from_canvas(&canvas, iso))
     }
 
@@ -371,6 +372,71 @@ impl TerrainView {
                 continue;
             }
             draw_texture_ex(t, at.x, at.y, WHITE, DrawTextureParams { dest_size: Some(size), ..Default::default() });
+        }
+    }
+}
+
+/// Light and shade the ground by the map's vertex heights, so hills look round.
+///
+/// This is our own approximation, not the game's formula (that one is still to be found
+/// in the exe): light comes from the upper left of the screen, a slope facing it gets
+/// brighter, a slope facing away darker. Each vertex gets a brightness from the height
+/// difference of its neighbours, and pixels inside a tile blend the brightness of the
+/// tile's four corners.
+fn shade_by_height(canvas: &mut [u8], width: usize, map: &MapFile, level: usize, iso: &Iso) {
+    // how much one unit of height difference changes the brightness (picked by eye)
+    const STRENGTH: f32 = 1.0 / 60.0;
+    let size = map.header.size as i32;
+    let height = |row: i32, col: i32| -> Option<f32> {
+        if row < 0 || col < 0 {
+            return None;
+        }
+        map.height(level, row as usize, col as usize).map(f32::from)
+    };
+    // Brightness of a vertex. Screen up-left is the direction of smaller columns (columns
+    // grow to the lower right), so ground rising towards larger columns faces the light.
+    // Rows (growing to the lower left) count half: their direction is only partly lit.
+    let brightness = |row: i32, col: i32| -> f32 {
+        let Some(here) = height(row, col) else { return 1.0 };
+        let along = |a: Option<f32>, b: Option<f32>| b.unwrap_or(here) - a.unwrap_or(here);
+        let slope = along(height(row, col - 1), height(row, col + 1)) + 0.5 * along(height(row - 1, col), height(row + 1, col));
+        (1.0 + STRENGTH * slope).clamp(0.6, 1.4)
+    };
+
+    for row in 0..size {
+        for col in 0..size {
+            if map.tile(level, row as usize, col as usize).is_none() {
+                continue;
+            }
+            // corners: top = vertex (row, col), right = (row, col + 1),
+            // left = (row + 1, col), bottom = (row + 1, col + 1)
+            let top = brightness(row, col);
+            let right = brightness(row, col + 1);
+            let left = brightness(row + 1, col);
+            let bottom = brightness(row + 1, col + 1);
+            let (x0, y0) = iso.tile_corner(Pos { col, row });
+            for py in 0..TILE_HEIGHT as i32 {
+                for px in 0..TILE_WIDTH as i32 {
+                    // position inside the diamond: a runs along the column axis, b along rows
+                    let u = (px as f32 + 0.5 - 32.0) / 32.0;
+                    let v = (py as f32 + 0.5 - 16.0) / 16.0;
+                    let a = (u + v) / 2.0 + 0.5;
+                    let b = (v - u) / 2.0 + 0.5;
+                    if !(0.0..1.0).contains(&a) || !(0.0..1.0).contains(&b) {
+                        continue;
+                    }
+                    let light = top * (1.0 - a) * (1.0 - b) + right * a * (1.0 - b) + left * (1.0 - a) * b + bottom * a * b;
+                    let (x, y) = (x0 + px, y0 + py);
+                    if x < 0 || y < 0 || x as usize >= width {
+                        continue;
+                    }
+                    let i = 4 * (y as usize * width + x as usize);
+                    let Some(pixel) = canvas.get_mut(i..i + 3) else { continue };
+                    for c in pixel {
+                        *c = (*c as f32 * light).min(255.0) as u8;
+                    }
+                }
+            }
         }
     }
 }
