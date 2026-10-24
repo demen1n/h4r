@@ -6,22 +6,19 @@
 //! keys: arrows/WASD — scroll, -/= — zoom, Space — centre on the hero
 
 mod actor_view;
+mod mover;
 mod terrain_view;
 mod world;
-
-use std::collections::VecDeque;
 
 use h4_formats::archive::{data_dir, Resources};
 use macroquad::prelude::*;
 
-use actor_view::{direction, Actors};
+use actor_view::Actors;
+use mover::Mover;
 use terrain_view::{Iso, TerrainView};
 use world::{Pos, World};
 
 const HERO: &str = "hero.might_might_male";
-/// Tiles per second while walking.
-const WALK_SPEED: f32 = 3.0;
-const ANIM_FPS: f32 = 12.0;
 
 /// What part of the map is on screen: `pos` is the map pixel at the window's top-left.
 pub struct Camera {
@@ -43,69 +40,10 @@ impl Camera {
     }
 }
 
-struct Hero {
-    tile: Pos,
-    path: VecDeque<Pos>,
-    /// 0..1 along the step from `tile` to `path[0]`.
-    step: f32,
-    facing: &'static str,
-    clock: f32,
-}
-
-impl Hero {
-    /// Map pixel of the hero's feet, between tiles while walking.
-    fn feet(&self, iso: &Iso) -> Vec2 {
-        let here = iso.tile_center(self.tile);
-        match self.path.front() {
-            Some(next) => here.lerp(iso.tile_center(*next), self.step),
-            None => here,
-        }
-    }
-
-    fn update(&mut self, dt: f32) {
-        self.clock += dt;
-        let Some(next) = self.path.front().copied() else { return };
-        self.facing = direction(next.col - self.tile.col, next.row - self.tile.row);
-        // diagonal steps on screen (n, s, e, w) are longer; keep the speed even
-        let length = if self.facing.len() == 1 { 1.4 } else { 1.0 };
-        self.step += dt * WALK_SPEED / length;
-        if self.step >= 1.0 {
-            self.step -= 1.0;
-            self.tile = next;
-            self.path.pop_front();
-            if self.path.is_empty() {
-                self.step = 0.0;
-            }
-        }
-    }
-}
-
-/// A creature standing on the map, playing its idle animation.
-struct Standing {
-    actor: &'static str,
-    tile: Pos,
-    facing: &'static str,
-    clock: f32,
-}
-
-/// Something to draw this frame: which animation, and where the feet are on the map.
-struct Sprite {
-    actor: &'static str,
-    action: &'static str,
-    facing: &'static str,
-    clock: f32,
-    feet: Vec2,
-}
-
-fn draw_actor(actors: &Actors, camera: &Camera, s: &Sprite) {
-    // creatures idle with "wait", heroes only have "stand"
-    let fallbacks: &[&str] = if s.action == "wait" { &["wait", "stand", "fidget"] } else { &[s.action] };
-    let Some(anim) = fallbacks.iter().find_map(|a| actors.get(s.actor, a, s.facing)) else { return };
-    if anim.frames.is_empty() {
-        return;
-    }
-    let frame = &anim.frames[(s.clock * ANIM_FPS) as usize % anim.frames.len()];
-    let at = camera.to_screen(s.feet + anim.origin);
+fn draw_mover(res: &Resources, camera: &Camera, iso: &Iso, m: &Mover) {
+    let Some((anim, i)) = m.frame(res) else { return };
+    let frame = &anim.frames[i];
+    let at = camera.to_screen(m.feet(iso) + anim.origin);
     let size = frame.size() * camera.zoom;
     draw_texture_ex(frame, at.x, at.y, WHITE, DrawTextureParams { dest_size: Some(size), ..Default::default() });
 }
@@ -142,13 +80,17 @@ async fn main() {
     };
     let actors = Actors::new(&res);
 
-    let mut hero = Hero { tile: Pos { col: 3, row: 36 }, path: VecDeque::new(), step: 0.0, facing: "e", clock: 0.0 };
-    let mut standing = vec![
-        Standing { actor: "griffin", tile: Pos { col: 18, row: 20 }, facing: "sw", clock: 0.0 },
-        Standing { actor: "black dragon", tile: Pos { col: 33, row: 26 }, facing: "w", clock: 0.3 },
-        Standing { actor: "dwarf", tile: Pos { col: 10, row: 22 }, facing: "se", clock: 0.6 },
-        Standing { actor: "Cyclops", tile: Pos { col: 30, row: 6 }, facing: "s", clock: 0.1 },
-        Standing { actor: "White Tiger", tile: Pos { col: 6, row: 12 }, facing: "e", clock: 0.4 },
+    let spawn = |name: &str, col, row, facing| {
+        let actor = actors.get(name).unwrap_or_else(|| panic!("no adv_actor.{name}"));
+        Mover::new(actor, Pos { col, row }, facing)
+    };
+    let mut hero = spawn(HERO, 3, 36, "e");
+    let mut creatures = vec![
+        spawn("Griffin", 18, 20, "sw"),
+        spawn("Black Dragon", 33, 26, "w"),
+        spawn("Dwarf", 10, 22, "se"),
+        spawn("Cyclops", 30, 6, "s"),
+        spawn("White Tiger", 6, 12, "e"),
     ];
 
     let mut camera = Camera { pos: Vec2::ZERO, zoom: 1.0 };
@@ -209,37 +151,24 @@ async fn main() {
             let m = camera.to_map(mouse);
             let target = iso.tile_at(m.x, m.y);
             // finish the current step first, then go
-            let start = hero.path.front().copied().unwrap_or(hero.tile);
-            if let Some(path) = world.find_path(start, target) {
-                let current = hero.path.pop_front();
-                hero.path.clear();
-                hero.path.extend(current);
-                hero.path.extend(path.into_iter().filter(|p| *p != start));
+            if let Some(path) = world.find_path(hero.next_tile(), target) {
+                hero.walk(path);
             }
         }
-        hero.update(dt);
-        for s in &mut standing {
-            s.clock += dt;
+        hero.update(&res, dt);
+        for c in &mut creatures {
+            c.update(&res, dt);
         }
 
         // drawing: ground, then actors from back to front
         clear_background(BLACK);
         terrain.draw(&camera);
 
-        let mut sprites = vec![Sprite {
-            actor: HERO,
-            action: if hero.path.is_empty() { "wait" } else { "walk" },
-            facing: hero.facing,
-            clock: hero.clock,
-            feet: hero.feet(&iso),
-        }];
-        for s in &standing {
-            sprites.push(Sprite { actor: s.actor, action: "wait", facing: s.facing, clock: s.clock, feet: iso.tile_center(s.tile) });
-        }
+        let mut movers: Vec<&Mover> = creatures.iter().chain(std::iter::once(&hero)).collect();
         // whoever stands lower on screen is closer to the viewer and is drawn later
-        sprites.sort_by(|a, b| a.feet.y.total_cmp(&b.feet.y));
-        for s in &sprites {
-            draw_actor(&actors, &camera, s);
+        movers.sort_by(|a, b| a.feet(&iso).y.total_cmp(&b.feet(&iso).y));
+        for m in movers {
+            draw_mover(&res, &camera, &iso, m);
         }
 
         // where the mouse points

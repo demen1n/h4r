@@ -153,6 +153,9 @@ impl World {
         if !self.passable(to) {
             return None;
         }
+        if from == to {
+            return Some(Vec::new());
+        }
         let index = |p: Pos| (p.row * self.width + p.col) as usize;
         let mut came_from: Vec<Option<Pos>> = vec![None; self.tiles.len()];
         let mut queue = VecDeque::from([from]);
