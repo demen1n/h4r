@@ -343,7 +343,8 @@ async fn main() {
         // drawing: ground, object shadows, then everything upright from back to front
         clear_background(BLACK);
         terrain.draw(&camera);
-        for o in &objects {
+        let visible: Vec<&Placed> = objects.iter().filter(|o| o.on_screen(&camera, &iso)).collect();
+        for o in &visible {
             o.draw_shadow(&camera, &iso, time);
         }
 
@@ -353,7 +354,7 @@ async fn main() {
         for m in creatures.iter().chain(std::iter::once(&hero)) {
             upright.push((m.feet(&iso).y, Upright::Mover(m)));
         }
-        for o in &objects {
+        for &o in &visible {
             for s in o.strips(&iso) {
                 upright.push((s.key, Upright::Strip(o, s)));
             }

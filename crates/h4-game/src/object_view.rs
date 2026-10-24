@@ -116,6 +116,18 @@ impl Placed {
         vec2(c.x, c.y - 16.0)
     }
 
+    /// Whether any of the object's picture or shadow is inside the window. A real map has
+    /// thousands of objects; skipping the ones off screen keeps the frame rate up.
+    pub fn on_screen(&self, camera: &Camera, iso: &Iso) -> bool {
+        let anchor = self.anchor(iso);
+        let areas = [self.kind.image.as_ref().map(|i| i.area), self.kind.shadow.as_ref().map(|s| s.area)];
+        areas.into_iter().flatten().any(|area| {
+            let top_left = camera.to_screen(anchor + vec2(area.left as f32, area.top as f32));
+            let bottom_right = camera.to_screen(anchor + vec2(area.right as f32, area.bottom as f32));
+            bottom_right.x >= 0.0 && bottom_right.y >= 0.0 && top_left.x <= screen_width() && top_left.y <= screen_height()
+        })
+    }
+
     /// Flat on the ground, so drawn right after the terrain and before anything upright.
     pub fn draw_shadow(&self, camera: &Camera, iso: &Iso, time: f32) {
         if let Some(s) = &self.kind.shadow {
