@@ -69,7 +69,20 @@ async fn main() {
         }
     };
 
-    let world = World::generate(40, 40);
+    // H4_MAP=path/to/map.h4c (and H4_LEVEL=1 for underground): show a real map instead of
+    // the generated one. Only its terrain and roads are read so far, no objects.
+    let real_map = std::env::var("H4_MAP").ok().map(|path| {
+        let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        h4_formats::map::MapFile::read(&bytes, &path).unwrap_or_else(|e| panic!("{e}"))
+    });
+    let world = match &real_map {
+        Some(map) => {
+            let level = std::env::var("H4_LEVEL").ok().and_then(|l| l.parse().ok()).unwrap_or(0);
+            let level = level.min(map.header.levels as usize - 1);
+            World::from_map(map, level)
+        }
+        None => World::generate(40, 40),
+    };
     let iso = Iso::new(&world);
     let terrain = match TerrainView::build(&res, &world, &iso) {
         Ok(t) => t,
@@ -84,14 +97,22 @@ async fn main() {
         let actor = actors.get(name).unwrap_or_else(|| panic!("no adv_actor.{name}"));
         Mover::new(actor, Pos { col, row }, facing)
     };
-    let mut hero = spawn(HERO, 3, 36, "e");
-    let mut creatures = vec![
-        spawn("Griffin", 18, 20, "sw"),
-        spawn("Black Dragon", 33, 26, "w"),
-        spawn("Dwarf", 10, 22, "se"),
-        spawn("Cyclops", 30, 6, "s"),
-        spawn("White Tiger", 6, 12, "e"),
-    ];
+    let mut hero;
+    let mut creatures = Vec::new();
+    if real_map.is_some() {
+        // creatures of a real map come with its objects, which aren't read yet
+        let start = world.passable_near_center().unwrap_or(Pos { col: 0, row: 0 });
+        hero = spawn(HERO, start.col, start.row, "e");
+    } else {
+        hero = spawn(HERO, 3, 36, "e");
+        creatures = vec![
+            spawn("Griffin", 18, 20, "sw"),
+            spawn("Black Dragon", 33, 26, "w"),
+            spawn("Dwarf", 10, 22, "se"),
+            spawn("Cyclops", 30, 6, "s"),
+            spawn("White Tiger", 6, 12, "e"),
+        ];
+    }
 
     let mut camera = Camera { pos: Vec2::ZERO, zoom: 1.0 };
     camera.center_on(hero.feet(&iso));

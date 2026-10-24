@@ -108,6 +108,53 @@ impl World {
         self.contains(p) && self.tile(p).terrain != Terrain::Water
     }
 
+    /// One level of a real map from a `.h4c` file. Only what the prototype can draw is kept:
+    /// river, lava and ice "terrains" become water and the magic terrains grass for now, and
+    /// the corners outside the map's diamond are filled with water.
+    pub fn from_map(map: &h4_formats::map::MapFile, level: usize) -> World {
+        let size = map.header.size as i32;
+        let blank = Tile { terrain: Terrain::Water, set: 0, road: None };
+        let mut w = World { width: size, height: size, tiles: vec![blank; (size * size) as usize] };
+        for row in 0..size {
+            for col in 0..size {
+                let Some(t) = map.tile(level, row as usize, col as usize) else { continue };
+                // indices of the game's terrain enum, see h4_formats::map::TERRAIN_NAMES
+                let terrain = match t.terrain {
+                    0 => Terrain::Water,
+                    2 => Terrain::Rough,
+                    3 => Terrain::Swamp,
+                    4 => Terrain::Lava, // "volcanic"; its pictures are terrain.lava.*
+                    5 => Terrain::Snow,
+                    6 => Terrain::Sand,
+                    7 => Terrain::Dirt,
+                    8 => Terrain::Subterranean,
+                    9..=11 => Terrain::Water, // river, lava river, ice river
+                    _ => Terrain::Grass,      // grass and the special magic terrains
+                };
+                // Which road type is which number is a guess, not checked against the game yet.
+                let road = match t.road {
+                    1 => Some(Road::Dirt),
+                    2 => Some(Road::Gravel),
+                    3 => Some(Road::Cobblestone),
+                    _ => None,
+                };
+                *w.tile_mut(Pos { col, row }) = Tile { terrain, set: t.subtype, road };
+            }
+        }
+        w
+    }
+
+    /// A passable tile near the middle of the map, to put the hero on.
+    pub fn passable_near_center(&self) -> Option<Pos> {
+        let center = Pos { col: self.width / 2, row: self.height / 2 };
+        (0..self.width.max(self.height)).find_map(|r| {
+            (-r..=r).flat_map(|dr| (-r..=r).map(move |dc| (dc, dr))).find_map(|(dc, dr)| {
+                let p = Pos { col: center.col + dc, row: center.row + dr };
+                self.passable(p).then_some(p)
+            })
+        })
+    }
+
     /// A hand-made test map: grass with patches of other terrain, a lake and a road.
     pub fn generate(width: i32, height: i32) -> World {
         let blank = Tile { terrain: Terrain::Grass, set: 0, road: None };
