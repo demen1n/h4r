@@ -8,6 +8,7 @@
 //! - [`png`]: a minimal RGBA PNG writer for dumping decoded images.
 
 pub mod adv_actor;
+pub mod adv_object;
 pub mod archive;
 pub mod catalog;
 pub mod png;

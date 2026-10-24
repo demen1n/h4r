@@ -13,9 +13,13 @@
 //! ```
 //!
 //! A bitmap group (`layers.*`) is a u16 count followed by layers. An actor sequence
-//! (`actor_sequence.*`) is u16 2, u16 version (2, or 3 followed by u16 k and k i32s), u16 count,
-//! then the frames and their shadows as layers, then i32 x, i32 y (see [`ActorSequence::offset`])
-//! and u16 (unknown).
+//! (`actor_sequence.*`) is u16 2, then a `t_image_sequence` (reader rva 0x349930): u16 version
+//! (2, or 3 followed by u16 mode, i16 base frame, i16 base shadow), u16 count, then the frames and
+//! their shadows as layers, then i32 x, i32 y (see [`ActorSequence::offset`]), a u16-prefixed string in version 1 only,
+//! and in `actor_sequence` files a final u16 (unknown).
+//! The three version-3 fields are recomputed by the game from layer names after reading
+//! (rva 0x3490c0): mode 2 means there are `base frame` / `base shadow` layers drawn under every
+//! animation frame, as in animated buildings.
 
 use crate::reader::{bad, Reader};
 use crate::Result;
@@ -76,7 +80,8 @@ impl Layer {
         let rect = Rect { left: r.i32()?, top: r.i32()?, right: r.i32()?, bottom: r.i32()? };
         let height = rect.height().max(0) as usize;
         if height > 4096 || rect.width() > 4096 {
-            return bad(format!("layer {name:?} has an implausible size {rect:?}"));
+            let short: String = name.chars().take(32).collect();
+            return bad(format!("layer {short:?} has an implausible size {rect:?}"));
         }
         let mut rows = Vec::with_capacity(height);
         for _ in 0..height {
@@ -158,6 +163,9 @@ pub struct ActorSequence {
     pub frames: Vec<Layer>,
     /// Shadow for each frame, when present (layers named `shadow NNN`).
     pub shadows: Vec<Layer>,
+    /// `base shadow` and `base frame` (in that order): the still part of an animated object,
+    /// drawn under every frame. Empty for creatures and heroes.
+    pub base: Vec<Layer>,
     /// Added to layer coordinates to put the actor's feet at (0, 0). Read from the two i32s
     /// after the layers (they are about minus the middle-bottom of the frames).
     pub offset: (i32, i32),
@@ -165,29 +173,45 @@ pub struct ActorSequence {
 
 impl ActorSequence {
     pub fn read(data: &[u8]) -> Result<ActorSequence> {
-        let mut r = Reader::at(data, 2);
-        match r.u16()? {
-            2 => {}
-            // version 3 adds a list before the layers; seen only as [1 item: -1]
+        Self::read_from(&mut Reader::new(data))
+    }
+
+    /// Read a sequence that starts at the cursor. Adventure objects embed the same structure
+    /// inside their own files (see `adv_object`), so the reader works on a shared cursor.
+    pub(crate) fn read_from(r: &mut Reader) -> Result<ActorSequence> {
+        // outer u16: 2 in actor_sequence files, 1 inside adventure objects; layout is the same
+        r.u16()?;
+        let version = r.u16()?;
+        match version {
+            0..=2 => {}
+            // version 3 adds mode, base frame and base shadow; the game derives them again
+            // from the layer names, so we skip them too
             3 => {
-                let k = r.u16()? as usize;
-                r.take(4 * k)?;
+                r.take(6)?;
             }
             v => return bad(format!("unknown actor sequence version {v}")),
         }
         let n = r.u16()?;
-        let mut frames = Vec::new();
-        let mut shadows = Vec::new();
+        let mut s = ActorSequence { frames: Vec::new(), shadows: Vec::new(), base: Vec::new(), offset: (0, 0) };
         for _ in 0..n {
-            let l = Layer::read(&mut r)?;
-            if l.name.to_lowercase().starts_with("shadow") {
-                shadows.push(l);
+            let l = Layer::read(r)?;
+            let name = l.name.to_lowercase();
+            if name.starts_with("base") {
+                s.base.push(l);
+            } else if name.starts_with("shadow") {
+                s.shadows.push(l);
             } else {
-                frames.push(l);
+                s.frames.push(l);
             }
         }
-        let offset = (r.i32()?, r.i32()?);
-        Ok(ActorSequence { frames, shadows, offset })
+        // shadow before frame, so `base` can be drawn in order
+        s.base.sort_by_key(|l| !l.name.to_lowercase().contains("shadow"));
+        s.offset = (r.i32()?, r.i32()?);
+        if version == 1 {
+            // version 1 also stores a name here (seen empty)
+            r.str16()?;
+        }
+        Ok(s)
     }
 
     /// Bounding box of all frames and shadows, so every frame can share one canvas.
@@ -195,6 +219,7 @@ impl ActorSequence {
         self.frames
             .iter()
             .chain(&self.shadows)
+            .chain(&self.base)
             .filter(|l| !l.is_empty())
             .map(|l| l.rect)
             .reduce(|a, b| a.union(&b))
@@ -203,6 +228,11 @@ impl ActorSequence {
     /// Frame `i` with its shadow underneath, as RGBA8 over `area` (usually [`Self::bounds`]).
     pub fn compose(&self, i: usize, area: Rect, with_shadow: bool) -> Vec<u8> {
         let mut buf = vec![0u8; 4 * (area.width() * area.height()).max(0) as usize];
+        for b in &self.base {
+            if with_shadow || !b.name.to_lowercase().contains("shadow") {
+                b.draw_onto(&mut buf, area);
+            }
+        }
         if with_shadow {
             if let Some(s) = self.shadows.get(i) {
                 s.draw_onto(&mut buf, area);

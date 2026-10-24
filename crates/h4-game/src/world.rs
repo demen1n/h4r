@@ -89,6 +89,10 @@ pub struct World {
     pub width: i32,
     pub height: i32,
     tiles: Vec<Tile>,
+    /// Tiles under an object's footprint, passable or not: no other object may go there.
+    taken: Vec<bool>,
+    /// Tiles nobody can step on because an object stands there.
+    blocked: Vec<bool>,
 }
 
 impl World {
@@ -97,21 +101,38 @@ impl World {
     }
 
     pub fn tile(&self, p: Pos) -> &Tile {
-        &self.tiles[(p.row * self.width + p.col) as usize]
+        &self.tiles[self.index(p)]
     }
 
     fn tile_mut(&mut self, p: Pos) -> &mut Tile {
-        &mut self.tiles[(p.row * self.width + p.col) as usize]
+        let i = self.index(p);
+        &mut self.tiles[i]
+    }
+
+    fn index(&self, p: Pos) -> usize {
+        (p.row * self.width + p.col) as usize
     }
 
     pub fn passable(&self, p: Pos) -> bool {
-        self.contains(p) && self.tile(p).terrain != Terrain::Water
+        self.contains(p) && self.tile(p).terrain != Terrain::Water && !self.blocked[self.index(p)]
+    }
+
+    pub fn is_taken(&self, p: Pos) -> bool {
+        self.contains(p) && self.taken[self.index(p)]
+    }
+
+    /// Mark a tile as part of an object's footprint; `blocked` if heroes can't enter it.
+    pub fn take(&mut self, p: Pos, blocked: bool) {
+        let i = self.index(p);
+        self.taken[i] = true;
+        self.blocked[i] |= blocked;
     }
 
     /// A hand-made test map: grass with patches of other terrain, a lake and a road.
     pub fn generate(width: i32, height: i32) -> World {
         let blank = Tile { terrain: Terrain::Grass, set: 0, road: None };
-        let mut w = World { width, height, tiles: vec![blank; (width * height) as usize] };
+        let n = (width * height) as usize;
+        let mut w = World { width, height, tiles: vec![blank; n], taken: vec![false; n], blocked: vec![false; n] };
         for row in 0..height {
             for col in 0..width {
                 let p = Pos { col, row };
@@ -173,7 +194,7 @@ impl World {
         if from == to {
             return Some(Vec::new());
         }
-        let index = |p: Pos| (p.row * self.width + p.col) as usize;
+        let index = |p: Pos| self.index(p);
         let mut came_from: Vec<Option<Pos>> = vec![None; self.tiles.len()];
         let mut queue = VecDeque::from([from]);
         came_from[index(from)] = Some(from);

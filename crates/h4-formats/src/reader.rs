@@ -41,10 +41,6 @@ impl<'a> Reader<'a> {
         Reader { data, pos: 0 }
     }
 
-    pub fn at(data: &'a [u8], pos: usize) -> Self {
-        Reader { data, pos }
-    }
-
     pub fn remaining(&self) -> usize {
         self.data.len().saturating_sub(self.pos)
     }
