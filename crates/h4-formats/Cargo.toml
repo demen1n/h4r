@@ -7,3 +7,7 @@ description = "Readers for Heroes of Might and Magic IV data files"
 
 [dependencies]
 flate2 = "1"
+
+[dev-dependencies]
+# to build small synthetic .h4r archives in tests
+flate2 = "1"

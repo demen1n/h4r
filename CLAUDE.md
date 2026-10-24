@@ -33,12 +33,13 @@ Workspace в корне (`Cargo.toml`), Rust 1.99:
 - `crates/h4-viewer` — просмотрщик на macroquad (Metal на маке). `h4-viewer [data]`; клавиши: ←/→ актёр, ↑/↓ действие, Q/E поворот, Space, `,` `.`, `[` `]` скорость, `-` `=` зум, S тень. `h4-dump <actor> <action> <dir> out.png` — кадры в PNG без окна (для проверки).
 - `crates/h4-game` — прототип карты приключений (macroquad): `world.rs` (тайлы, генератор тестовой карты 40×40, поиск пути BFS), `terrain_view.rs` (запекание земли в текстуры 1024², изометрия `Iso`), `actor_view.rs` (ленивые анимации, направление шага), `main.rs` (камера, герой ходит по клику, стоящие существа, сортировка по глубине). `H4_SCREENSHOT=out.png` — снять кадр и выйти (для проверки без человека).
 - Стыковка земли (найдено экспериментом, `examples/terrain_tiling.rs`): метатайлы кладутся каждые 5 тайлов по обеим осям, внахлёст; первое число в имени — набор (вид), второе — чередование шахматкой. Дыр нет, швов не видно. Дороги — так же (`terrain.road.<вид>.<1|2>`), прокладывать без диагоналей, иначе пунктир. Границы между видами земли пока резкие (нет масок `transition`).
-- `adv_actor.*` (`h4-formats/src/adv_actor.rs`, все 120 читаются): u16 3, u8 1, u16 prewalk/walk/postwalk length (шаг на клетку = 32), u16 число действий; действие = имя, u8 кадров/с, 8 имён последовательностей (ne,e,se,s,sw,w,nw,n); в конце offset и flag_offset (i32×2 каждый). Значения полей подтверждены именами методов из мапа (`get_frames_per_second`, `get_walk_length`, `get_flag_offset`). В `h4-game/src/mover.rs` движение по фазам prewalk → walk → postwalk, скорость = длина / длительность анимации (ноги не скользят), в покое wait + изредка fidget.
+- `adv_actor.*` (`h4-formats/src/adv_actor.rs`, все 154 читаются): u16 3, u8 1, u16 prewalk/walk/postwalk length (шаг на клетку = 32), u16 число действий; действие = имя, u8 кадров/с, 8 имён последовательностей (ne,e,se,s,sw,w,nw,n); в конце offset и flag_offset (i32×2 каждый). Значения полей подтверждены именами методов из мапа (`get_frames_per_second`, `get_walk_length`, `get_flag_offset`). В `h4-game/src/mover.rs` движение по фазам prewalk → walk → postwalk, скорость = длина / длительность анимации (ноги не скользят), в покое wait + изредка fidget.
 - Привязка спрайта: i32×2 после слоёв `ActorSequence` (`offset`, у грифона −361,−347) переводят координаты слоёв в систему «ноги в (0,0)». У героев нет `wait`, бездействие — `stand`.
 - Путь к данным: аргумент → `$H4_DATA` → обёртка Sikarugir (`h4_formats::archive::data_dir`).
 
 ```sh
 cargo build --release && ./target/release/h4-viewer
+cargo test --release --workspace   # ~10 s; tests on game data skip themselves without the game
 cargo run --release --example check_sequences -- "$H4_DATA"
 ```
 
