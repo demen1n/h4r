@@ -54,6 +54,13 @@ struct Row {
     offset: u32,
 }
 
+impl Row {
+    /// Number of pixels stored for this row.
+    fn len(&self) -> usize {
+        (self.x1 as usize).saturating_sub(self.x0 as usize)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Layer {
     pub name: String,
@@ -74,15 +81,24 @@ impl Layer {
         let name = r.str16()?;
         let alpha_depth = r.u8()?;
         let rect = Rect { left: r.i32()?, top: r.i32()?, right: r.i32()?, bottom: r.i32()? };
-        let height = rect.height().max(0) as usize;
-        if height > 4096 || rect.width() > 4096 {
+        // Check the size in i64: garbage coordinates near i32::MIN/MAX would overflow the
+        // subtraction in `Rect::width`/`height` (a panic in debug builds).
+        let wide_width = rect.right as i64 - rect.left as i64;
+        let wide_height = rect.bottom as i64 - rect.top as i64;
+        if !(-4096..=4096).contains(&wide_width) || !(-4096..=4096).contains(&wide_height) {
             return bad(format!("layer {name:?} has an implausible size {rect:?}"));
         }
+        let height = wide_height.max(0) as usize;
         let mut rows = Vec::with_capacity(height);
         for _ in 0..height {
             rows.push(Row { x0: r.u16()?, x1: r.u16()?, offset: r.u32()? });
         }
-        let n = rows.last().map_or(0, |l| l.offset as usize + (l.x1 as usize).saturating_sub(l.x0 as usize));
+        let n = rows.last().map_or(0, |l| l.offset as usize + l.len());
+        // Every row must lie inside the pixel data, or drawing would index past its end.
+        // (The file only stores the total implicitly, through the last row.)
+        if let Some(y) = rows.iter().position(|row| row.offset as usize + row.len() > n) {
+            return bad(format!("layer {name:?}: row {y} points past the {n} bytes of pixel data"));
+        }
         let pixels = r.take(n)?.to_vec();
         let mut alpha = Vec::new();
         if alpha_depth >= 4 && n > 0 {
@@ -99,16 +115,24 @@ impl Layer {
     }
 
     /// Alpha-blend this layer over an RGBA8 `canvas` that covers `area` in layer coordinates.
+    ///
+    /// `Layer::read` has already checked that every row lies inside the pixel data. Pixels
+    /// that would land outside `area` (or outside a canvas too small for `area`) are skipped,
+    /// so drawing never panics.
     pub fn draw_onto(&self, canvas: &mut [u8], area: Rect) {
-        let width = area.width() as usize;
+        // i64 so that positions far outside the area can't overflow
+        let (area_w, area_h) = (area.width() as i64, area.height() as i64);
+        if area_w <= 0 || area_h <= 0 {
+            return;
+        }
         for (y, row) in self.rows.iter().enumerate() {
-            let cy = self.rect.top + y as i32 - area.top;
-            if cy < 0 || cy >= area.height() {
+            let cy = self.rect.top as i64 + y as i64 - area.top as i64;
+            if cy < 0 || cy >= area_h {
                 continue;
             }
-            for i in 0..row.x1.saturating_sub(row.x0) as usize {
-                let cx = self.rect.left + row.x0 as i32 + i as i32 - area.left;
-                if cx < 0 || cx >= area.width() {
+            for i in 0..row.len() {
+                let cx = self.rect.left as i64 + row.x0 as i64 + i as i64 - area.left as i64;
+                if cx < 0 || cx >= area_w {
                     continue;
                 }
                 let k = row.offset as usize + i;
@@ -121,8 +145,8 @@ impl Layer {
                     continue;
                 }
                 let [r, g, b] = self.palette.get(self.pixels[k] as usize).copied().unwrap_or([255, 0, 255]);
-                let p = 4 * (cy as usize * width + cx as usize);
-                let dst = &mut canvas[p..p + 4];
+                let p = 4 * (cy * area_w + cx) as usize;
+                let Some(dst) = canvas.get_mut(p..p + 4) else { continue };
                 // "over" compositing on straight (non-premultiplied) alpha
                 let da = dst[3] as u32;
                 let out_a = a + da * (255 - a) / 255;

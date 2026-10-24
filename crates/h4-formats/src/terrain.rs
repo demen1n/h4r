@@ -24,7 +24,11 @@ pub const TILE_HEIGHT: usize = 32;
 pub const METATILE_SIZE: usize = 10;
 
 /// Height of each of the 64 columns of a tile diamond: 1, 1, 3, 3, ..., 31, 31, 31, 31, ..., 1, 1.
+/// Columns outside the tile (`x >= 64`) have height 0.
 pub fn column_height(x: usize) -> usize {
+    if x >= TILE_WIDTH {
+        return 0;
+    }
     let from_edge = x.min(TILE_WIDTH - 1 - x);
     2 * (from_edge / 2) + 1
 }
@@ -70,7 +74,13 @@ impl Metatile {
 
     /// Draw one tile with its top-left corner at (`x`, `y`) of an RGBA8 canvas `width` pixels
     /// wide. Transparent pixels leave the canvas untouched.
+    ///
+    /// The column offsets and run lengths come straight from the file, so every lookup is
+    /// checked: a column that runs out of data just stops early instead of panicking.
     pub fn draw_tile(&self, tile: &Tile, canvas: &mut [u8], width: usize, x: i32, y: i32) {
+        if width == 0 {
+            return;
+        }
         let height = canvas.len() / 4 / width;
         for cx in 0..TILE_WIDTH {
             let h = column_height(cx);
@@ -78,18 +88,21 @@ impl Metatile {
             let mut p = tile.columns[cx] as usize;
             let mut cy = 0;
             while cy < h {
-                cy += tile.data[p] as usize;
+                let Some(&skip) = tile.data.get(p) else { break };
+                cy += skip as usize;
                 p += 1;
                 if cy >= h {
                     break;
                 }
-                let count = tile.data[p] as usize;
+                let Some(&count) = tile.data.get(p) else { break };
+                let count = count as usize;
                 p += 1;
-                for k in 0..count {
-                    let px = x + cx as i32;
-                    let py = y + (top + cy + k) as i32;
+                let Some(run) = tile.data.get(p..p + count) else { break };
+                for (k, &index) in run.iter().enumerate() {
+                    let px = x as i64 + cx as i64;
+                    let py = y as i64 + (top + cy + k) as i64;
                     if px >= 0 && py >= 0 && (px as usize) < width && (py as usize) < height {
-                        let [r, g, b] = self.palette[tile.data[p + k] as usize];
+                        let [r, g, b] = self.palette.get(index as usize).copied().unwrap_or([255, 0, 255]);
                         let o = 4 * (py as usize * width + px as usize);
                         canvas[o..o + 4].copy_from_slice(&[r, g, b, 255]);
                     }

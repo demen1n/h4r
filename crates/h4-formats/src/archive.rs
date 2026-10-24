@@ -58,26 +58,13 @@ impl Archive {
         file.seek(SeekFrom::Start(dir_offset))?;
         file.read_to_end(&mut dir)?;
 
-        let mut r = Reader::new(&dir);
-        let count = r.u32()?;
-        let mut entries = Vec::with_capacity(count as usize);
-        for _ in 0..count {
-            let offset = r.u32()?;
-            let compressed_size = r.u32()?;
-            let size = r.u32()?;
-            let _time = r.u32()?;
-            let name = r.str16()?;
-            let _source_path = r.str16()?;
-            let alias = r.str16()?;
-            let kind = r.u32()?;
-            entries.push(Entry {
-                name,
-                offset,
-                compressed_size,
-                size,
-                alias: (!alias.is_empty()).then_some(alias),
-                kind,
-            });
+        let entries = read_directory(&dir)?;
+        // A bad offset or size would otherwise make `read` allocate gigabytes or fail later
+        // with a confusing I/O error; better to reject the archive up front.
+        let file_size = file.metadata()?.len();
+        let past_end = |e: &&Entry| e.alias.is_none() && e.offset as u64 + e.compressed_size as u64 > file_size;
+        if let Some(e) = entries.iter().find(past_end) {
+            return bad(format!("{}: entry {:?} lies past the end of the file", path.display(), e.name));
         }
         Ok(Archive { path, entries, file: Mutex::new(file) })
     }
@@ -90,10 +77,45 @@ impl Archive {
             f.seek(SeekFrom::Start(e.offset as u64))?;
             f.read_exact(&mut blob)?;
         }
-        let mut out = Vec::with_capacity(e.size as usize);
+        // The size is only a hint for the allocation; cap it so a corrupt value can't
+        // reserve gigabytes up front (the vector still grows if the data really is bigger).
+        let mut out = Vec::with_capacity((e.size as usize).min(64 << 20));
         GzDecoder::new(&blob[..]).read_to_end(&mut out)?;
         Ok(out)
     }
+}
+
+/// Smallest possible directory entry: four u32s, three empty strings, the type.
+const MIN_ENTRY_SIZE: usize = 4 * 4 + 3 * 2 + 4;
+
+/// Parse an archive's directory (the bytes from the directory offset to the end of the file).
+pub fn read_directory(dir: &[u8]) -> Result<Vec<Entry>> {
+    let mut r = Reader::new(dir);
+    let count = r.u32()? as usize;
+    // Don't trust the count for the allocation: a corrupt one could ask for billions.
+    if count > r.remaining() / MIN_ENTRY_SIZE {
+        return bad(format!("directory claims {count} entries but has only {} bytes", r.remaining()));
+    }
+    let mut entries = Vec::with_capacity(count);
+    for _ in 0..count {
+        let offset = r.u32()?;
+        let compressed_size = r.u32()?;
+        let size = r.u32()?;
+        let _time = r.u32()?;
+        let name = r.str16()?;
+        let _source_path = r.str16()?;
+        let alias = r.str16()?;
+        let kind = r.u32()?;
+        entries.push(Entry {
+            name,
+            offset,
+            compressed_size,
+            size,
+            alias: (!alias.is_empty()).then_some(alias),
+            kind,
+        });
+    }
+    Ok(entries)
 }
 
 /// All archives of a game install, looked up by name (case-insensitive) in load order.

@@ -47,16 +47,21 @@ impl Mask {
 
     /// Coverage 0..=255 at pixel (x, y) of the tile's 64x32 box.
     pub fn alpha(&self, x: usize, y: usize) -> u8 {
+        if x >= TILE_WIDTH {
+            return 0;
+        }
         let h = column_height(x);
         let top = (TILE_HEIGHT - h) / 2;
         if y < top || y >= top + h {
             return 0;
         }
         let i = y - top;
-        let col = &self.data[self.columns[x]..];
+        // `Transitions::read` takes exactly the bytes the columns need, so these lookups only
+        // fail if that size table is wrong; treat that as "not covered" rather than panic.
+        let byte = |n: usize| self.data.get(self.columns[x] + n).copied().unwrap_or(0);
         if self.depth == 4 {
-            ((col[i / 2] >> (4 * (i & 1))) & 15) * 17
-        } else if (col[i / 8] >> (i % 8)) & 1 != 0 {
+            ((byte(i / 2) >> (4 * (i & 1))) & 15) * 17
+        } else if (byte(i / 8) >> (i % 8)) & 1 != 0 {
             255
         } else {
             0
@@ -81,7 +86,11 @@ impl Transitions {
             for _ in 0..count {
                 let code = r.i32()?;
                 let depth = r.u8()?;
-                let size = if depth == 4 { 544 } else { 160 };
+                let size = match depth {
+                    1 => 160,
+                    4 => 544,
+                    d => return bad(format!("mask {code} in set {name:?} has unknown depth {d}")),
+                };
                 masks.insert(code, Mask::new(depth, r.take(size)?.to_vec()));
             }
             sets.insert(name, masks);
