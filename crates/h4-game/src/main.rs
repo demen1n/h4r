@@ -1,5 +1,5 @@
-//! Adventure map prototype: a generated map drawn with the original terrain, a hero who walks
-//! where you click, and a few creatures standing around.
+//! Adventure map prototype: a generated map drawn with the original terrain, trees, mountains
+//! and a few buildings, a hero who walks where you click, and creatures standing around.
 //!
 //! usage: h4-game [data dir]
 //! mouse: left click — walk there; right drag — scroll; wheel — zoom
@@ -7,16 +7,21 @@
 
 mod actor_view;
 mod mover;
+mod object_view;
 mod terrain_view;
 mod world;
+
+use std::collections::HashMap;
+use std::rc::Rc;
 
 use h4_formats::archive::{data_dir, Resources};
 use macroquad::prelude::*;
 
 use actor_view::Actors;
 use mover::Mover;
+use object_view::{ObjectKind, Placed, Strip};
 use terrain_view::{Iso, TerrainView};
-use world::{Pos, World};
+use world::{Pos, Terrain, World};
 
 const HERO: &str = "hero.might_might_male";
 
@@ -38,6 +43,89 @@ impl Camera {
     fn center_on(&mut self, p: Vec2) {
         self.pos = p - vec2(screen_width(), screen_height()) / (2.0 * self.zoom);
     }
+}
+
+/// Outline of a tile's diamond.
+fn draw_diamond(camera: &Camera, iso: &Iso, p: Pos, color: Color) {
+    let c = camera.to_screen(iso.tile_center(p));
+    let (hw, hh) = (32.0 * camera.zoom, 16.0 * camera.zoom);
+    let corners = [c + vec2(0.0, -hh), c + vec2(hw, 0.0), c + vec2(0.0, hh), c + vec2(-hw, 0.0)];
+    for i in 0..4 {
+        let (a, b) = (corners[i], corners[(i + 1) % 4]);
+        draw_line(a.x, a.y, b.x, b.y, 1.5, color);
+    }
+}
+
+/// Something upright on the map, drawn in back-to-front order.
+enum Upright<'a> {
+    Mover(&'a Mover),
+    /// A 32-pixel slice of an object image.
+    Strip(&'a Placed, Strip),
+}
+
+/// Buildings placed by hand near the hero's start, then forests and mountains scattered
+/// over the terrain they belong to. Objects that don't fit (water, road, another object)
+/// are skipped.
+fn place_objects(res: &Resources, world: &mut World) -> Vec<Placed> {
+    // each model is loaded once and shared by every copy on the map
+    let mut kinds: HashMap<&str, Option<Rc<ObjectKind>>> = HashMap::new();
+    let mut placed = Vec::new();
+    let mut put = |world: &mut World, name: &'static str, col: i32, row: i32| {
+        let kind = kinds.entry(name).or_insert_with(|| ObjectKind::load(res, name).map(Rc::new));
+        if let Some(k) = kind {
+            if let Some(p) = object_view::place(world, k, Pos { col, row }) {
+                placed.push(p);
+            }
+        }
+    };
+
+    // buildings around the start; the sawmill and its mirrored "R" twin check the footprint
+    // orientation (2x3 vs 3x2)
+    put(world, "creature generators.Hovel", 6, 31);
+    put(world, "Skill Enhancer.Library", 9, 35);
+    put(world, "movement modifiers.Stables", 1, 31);
+    put(world, "Shroud Removers.Tower", 9, 31);
+    put(world, "mine.Sawmill", 12, 32);
+    put(world, "mine.Sawmill R", 4, 27);
+    put(world, "mountains.Grass.31", 14, 36);
+    put(world, "mountains.Grass.04", 0, 24);
+
+    // scattered trees and mountains, picked by a fixed pseudo-random sequence so the map is
+    // the same every run
+    let grass_trees = [
+        "trees.Grass.oak 1",
+        "trees.Grass.oak 2",
+        "trees.Grass.Oak 4",
+        "trees.Grass.Cherry 2",
+        "trees.Grass.willow 1",
+        "trees.Grass.Plum 3",
+        "trees.Grass.Magnolia 2",
+    ];
+    let snow_trees = ["trees.Snow.Picea01", "trees.Snow.Picea04", "trees.Snow.Cembra02", "trees.Snow.Dry4"];
+    let grass_mountains = ["mountains.Grass.02", "mountains.Grass.05", "mountains.Grass.13", "mountains.Grass.26"];
+    let snow_mountains = ["mountains.Snow.03", "mountains.Snow.05"];
+    let mut seed: u32 = 12345;
+    let mut next = move |n: usize| {
+        seed = seed.wrapping_mul(1103515245).wrapping_add(12345);
+        (seed >> 16) as usize % n
+    };
+    for _ in 0..500 {
+        let p = Pos { col: next(world.width as usize) as i32, row: next(world.height as usize) as i32 };
+        let roll = next(100);
+        let name = match world.tile(p).terrain {
+            Terrain::Grass if roll < 6 => grass_mountains[next(grass_mountains.len())],
+            Terrain::Grass => grass_trees[next(grass_trees.len())],
+            Terrain::Snow if roll < 15 => snow_mountains[next(snow_mountains.len())],
+            Terrain::Snow => snow_trees[next(snow_trees.len())],
+            _ => continue,
+        };
+        // keep a clearing around the hero's start
+        if (p.col - 3).abs() + (p.row - 36).abs() < 4 {
+            continue;
+        }
+        put(world, name, p.col, p.row);
+    }
+    placed
 }
 
 fn draw_mover(res: &Resources, camera: &Camera, iso: &Iso, m: &Mover) {
@@ -75,7 +163,7 @@ async fn main() {
         let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
         h4_formats::map::MapFile::read(&bytes, &path).unwrap_or_else(|e| panic!("{e}"))
     });
-    let world = match &real_map {
+    let mut world = match &real_map {
         Some(map) => {
             let level = std::env::var("H4_LEVEL").ok().and_then(|l| l.parse().ok()).unwrap_or(0);
             let level = level.min(map.header.levels as usize - 1);
@@ -113,6 +201,15 @@ async fn main() {
             spawn("White Tiger", 6, 12, "e"),
         ];
     }
+    // keep objects off the tiles where someone already stands
+    for m in creatures.iter().chain(std::iter::once(&hero)) {
+        world.take(m.next_tile(), false);
+    }
+    // a real map's objects aren't read yet; the sample objects only fit the generated map
+    let objects = if real_map.is_some() { Vec::new() } else { place_objects(&res, &mut world) };
+    // H4_FOOTPRINTS=1: outline object cells (red: impassable) to check them against the art
+    let show_footprints = std::env::var("H4_FOOTPRINTS").is_ok();
+    let mut time = 0.0;
 
     let mut camera = Camera { pos: Vec2::ZERO, zoom: 1.0 };
     camera.center_on(hero.feet(&iso));
@@ -128,6 +225,7 @@ async fn main() {
 
     loop {
         let dt = get_frame_time();
+        time += dt;
         let mouse = Vec2::from(mouse_position());
 
         // scrolling and zoom
@@ -186,15 +284,42 @@ async fn main() {
             c.update(&res, dt);
         }
 
-        // drawing: ground, then actors from back to front
+        // drawing: ground, object shadows, then everything upright from back to front
         clear_background(BLACK);
         terrain.draw(&camera);
+        for o in &objects {
+            o.draw_shadow(&camera, &iso, time);
+        }
 
-        let mut movers: Vec<&Mover> = creatures.iter().chain(std::iter::once(&hero)).collect();
-        // whoever stands lower on screen is closer to the viewer and is drawn later
-        movers.sort_by(|a, b| a.feet(&iso).y.total_cmp(&b.feet(&iso).y));
-        for m in movers {
-            draw_mover(&res, &camera, &iso, m);
+        // Whatever stands lower on screen is closer to the viewer and is drawn later. Objects
+        // take part as 32-pixel strips, each sorted by the front of the footprint under it.
+        let mut upright: Vec<(f32, Upright)> = Vec::new();
+        for m in creatures.iter().chain(std::iter::once(&hero)) {
+            upright.push((m.feet(&iso).y, Upright::Mover(m)));
+        }
+        for o in &objects {
+            for s in o.strips(&iso) {
+                upright.push((s.key, Upright::Strip(o, s)));
+            }
+        }
+        // on a tie (a hero beside an object's front cell) the hero goes in front
+        upright.sort_by(|a, b| {
+            let is_mover = |u: &Upright| matches!(u, Upright::Mover(_));
+            a.0.total_cmp(&b.0).then(is_mover(&a.1).cmp(&is_mover(&b.1)))
+        });
+        for (_, u) in &upright {
+            match u {
+                Upright::Mover(m) => draw_mover(&res, &camera, &iso, m),
+                Upright::Strip(o, s) => o.draw_strip(&camera, &iso, s, time),
+            }
+        }
+        if show_footprints {
+            for o in &objects {
+                for (p, blocked) in o.kind.cells(o.at) {
+                    let color = if blocked { Color::new(1.0, 0.2, 0.2, 0.9) } else { Color::new(0.2, 1.0, 0.2, 0.9) };
+                    draw_diamond(&camera, &iso, p, color);
+                }
+            }
         }
 
         // where the mouse points
@@ -203,14 +328,8 @@ async fn main() {
             iso.tile_at(m.x, m.y)
         };
         if world.contains(hover) {
-            let c = camera.to_screen(iso.tile_center(hover));
-            let (hw, hh) = (32.0 * camera.zoom, 16.0 * camera.zoom);
             let color = if world.passable(hover) { Color::new(1.0, 1.0, 1.0, 0.6) } else { Color::new(1.0, 0.3, 0.3, 0.6) };
-            let corners = [c + vec2(0.0, -hh), c + vec2(hw, 0.0), c + vec2(0.0, hh), c + vec2(-hw, 0.0)];
-            for i in 0..4 {
-                let (a, b) = (corners[i], corners[(i + 1) % 4]);
-                draw_line(a.x, a.y, b.x, b.y, 1.5, color);
-            }
+            draw_diamond(&camera, &iso, hover, color);
         }
 
         let t = if world.contains(hover) { format!("{:?}", world.tile(hover).terrain) } else { String::new() };
