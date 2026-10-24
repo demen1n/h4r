@@ -267,9 +267,9 @@ async fn main() {
     let show_footprints = std::env::var("H4_FOOTPRINTS").is_ok();
     let mut time = 0.0;
 
-    // One game pixel per screen point, like the original in a window: on a Retina screen
-    // that is 2x2 physical pixels. At zoom 1 everything looked half the size and too sharp.
-    let mut camera = Camera { pos: Vec2::ZERO, zoom: screen_dpi_scale() };
+    // Start zoom picked by eye against the original running under Wine on a Retina Mac:
+    // 1.28 looks closest; zoom 1 is too small, 2 too coarse.
+    let mut camera = Camera { pos: Vec2::ZERO, zoom: 1.28 };
     camera.center_on(hero.feet(&iso));
     // H4_OVERVIEW=1: start zoomed out over the whole map (handy with H4_SCREENSHOT)
     if std::env::var("H4_OVERVIEW").is_ok() {
