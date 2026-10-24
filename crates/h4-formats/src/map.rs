@@ -10,19 +10,20 @@
 //! rva `d15c0` in our exe):
 //!
 //! 1. the map header ([`MapHeader`], reader at rva `37a320`): sizes, players, teams, texts;
-//! 2. events, allowed heroes/artifacts/spells, AI hints and then every object on the map
-//!    (not decoded yet);
+//! 2. events, allowed artifacts/skills/spells, AI hints and then every object on the map
+//!    ([`crate::map_body`]);
 //! 3. the tiles of every level, row by row ([`Tile`], reader at rva `139d0`);
 //! 4. one height byte per tile vertex.
 //!
-//! Until part 2 is understood we can't walk to the tiles from the front. Parts 3 and 4 have
-//! sizes that follow from the header, though, and they end the stream, so [`MapFile::read`]
-//! finds where the tiles start by checking which offset parses into exactly the right
-//! number of valid tiles followed by exactly the height bytes. On every map of the
-//! installation there is exactly one such offset. This is a stopgap: once objects are read,
-//! the tiles will simply follow them.
+//! [`MapFile::read`] reads part 2 and then the tiles right after it. If part 2 fails (an
+//! object type or version we don't know yet), it falls back to finding the tiles from the
+//! end: parts 3 and 4 have sizes that follow from the header and end the stream, so the
+//! tiles start at the one offset that parses into exactly the right number of valid tiles
+//! followed by exactly the height bytes. On all 106 maps of the installation both ways
+//! give the same offset.
 
 use crate::cp1251;
+use crate::map_body::{self, MapBody};
 use crate::reader::{bad, Reader};
 use crate::{Error, Result};
 
@@ -149,9 +150,12 @@ pub struct RoadTransition {
     pub mask_set: u8,
 }
 
-/// A whole map: header, the still undecoded middle and the tiles.
+/// A whole map: header, events and objects, tiles.
 pub struct MapFile {
     pub header: MapHeader,
+    /// Events and objects, or why they couldn't be read (then the tiles were found from
+    /// the end of the stream instead).
+    pub body: std::result::Result<MapBody, String>,
     /// The decompressed stream.
     pub data: Vec<u8>,
     /// Where the header ends in `data`.
@@ -170,8 +174,15 @@ impl MapFile {
     pub fn read(file: &[u8], name: &str) -> Result<MapFile> {
         let data = unpack(file).map_err(|e| context(e, name))?;
         let (header, header_end) = MapHeader::read(&data).map_err(|e| context(e, name))?;
-        let (tiles_start, tiles, heights) = find_tiles(&data, &header, header_end).map_err(|e| context(e, name))?;
-        Ok(MapFile { header, data, header_end, tiles_start, tiles, heights })
+        let players: Vec<u8> = header.players.iter().map(|p| p.color).collect();
+        let mut r = Reader::at(&data, header_end);
+        let body = map_body::read_body(&mut r, header.version, &players).map_err(|e| e.to_string());
+        let (tiles_start, tiles, heights) = match &body {
+            Ok(_) => read_tiles_at(&data, &header, r.pos),
+            Err(_) => find_tiles(&data, &header, header_end),
+        }
+        .map_err(|e| context(e, name))?;
+        Ok(MapFile { header, body, data, header_end, tiles_start, tiles, heights })
     }
 
     /// The tile at (`row`, `column`) of `level`, if it lies inside the map diamond.
@@ -453,6 +464,47 @@ fn read_tile(r: &mut Reader, version: u8) -> Result<Option<Tile>> {
 
 fn valid_terrain(terrain: u8, subtype: u8) -> bool {
     (terrain as usize) < TERRAIN_SUBTYPES.len() && subtype < TERRAIN_SUBTYPES[terrain as usize]
+}
+
+/// Read the tiles starting at `start` (right after the objects); they must be followed by
+/// exactly the height bytes.
+fn read_tiles_at(data: &[u8], header: &MapHeader, start: usize) -> Result<(usize, Vec<Tile>, Vec<u8>)> {
+    let (tile_count, vertex_count) = tile_and_vertex_counts(header)?;
+    let version = header.tile_version();
+    let mut r = Reader::at(data, start);
+    let mut tiles = Vec::with_capacity(tile_count);
+    for _ in 0..tile_count {
+        let at = r.pos;
+        match read_tile(&mut r, version)? {
+            Some(t) => tiles.push(t),
+            None => return bad(format!("invalid tile at {at:#x} (objects ended at {start:#x})")),
+        }
+    }
+    if r.remaining() != vertex_count {
+        return bad(format!(
+            "after the tiles {} bytes are left, the height map needs {vertex_count}",
+            r.remaining()
+        ));
+    }
+    Ok((start, tiles, data[r.pos..].to_vec()))
+}
+
+/// Tiles and vertices of all levels.
+fn tile_and_vertex_counts(header: &MapHeader) -> Result<(usize, usize)> {
+    let size = header.size as usize;
+    if size < 2 || size > 1024 || !(1..=2).contains(&header.levels) {
+        return bad(format!("implausible map size {size} x {} levels", header.levels));
+    }
+    let levels = header.levels as usize;
+    let tiles = row_ranges(size).iter().map(|(s, e)| e - s).sum::<usize>() * levels;
+    let vertices = vertex_row_ranges(size).iter().map(|(s, e)| e - s).sum::<usize>() * levels;
+    Ok((tiles, vertices))
+}
+
+/// Where the tiles start according to the search from the end (for checking the
+/// sequential read, see `examples/check_maps.rs`).
+pub fn search_tiles_start(map: &MapFile) -> Result<usize> {
+    Ok(find_tiles(&map.data, &map.header, map.header_end)?.0)
 }
 
 /// Find the tile array by its end (see the module docs) and read tiles and heights.
