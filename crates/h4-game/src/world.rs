@@ -19,6 +19,23 @@ pub enum Terrain {
 }
 
 impl Terrain {
+    /// Which terrain is drawn over which at their border: higher wins. This is the order of
+    /// the game's terrain enum (water, grass, rough, swamp, volcanic, snow, sand, dirt,
+    /// subterranean), which is also the order its transition calculator evaluates them in.
+    pub fn priority(self) -> u8 {
+        match self {
+            Terrain::Water => 0,
+            Terrain::Grass => 1,
+            Terrain::Rough => 2,
+            Terrain::Swamp => 3,
+            Terrain::Lava => 4,
+            Terrain::Snow => 5,
+            Terrain::Sand => 6,
+            Terrain::Dirt => 7,
+            Terrain::Subterranean => 8,
+        }
+    }
+
     /// Name used in `terrain.<name>.<set>.<n>.h4d`.
     pub fn resource_name(self) -> &'static str {
         match self {

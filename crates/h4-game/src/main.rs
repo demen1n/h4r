@@ -95,6 +95,11 @@ async fn main() {
 
     let mut camera = Camera { pos: Vec2::ZERO, zoom: 1.0 };
     camera.center_on(hero.feet(&iso));
+    // H4_OVERVIEW=1: start zoomed out over the whole map (handy with H4_SCREENSHOT)
+    if std::env::var("H4_OVERVIEW").is_ok() {
+        camera.zoom = (screen_width() / iso.width as f32).min(screen_height() / iso.height as f32);
+        camera.center_on(vec2(iso.width as f32, iso.height as f32) / 2.0);
+    }
     let mut drag_from: Option<Vec2> = None;
     // H4_SCREENSHOT=file.png: save one frame after things have loaded, then quit (for testing)
     let screenshot = std::env::var("H4_SCREENSHOT").ok();
