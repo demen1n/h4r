@@ -16,6 +16,9 @@ pub enum Terrain {
     #[allow(dead_code)]
     Subterranean,
     Water,
+    /// Rivers of a real map (water, lava and ice rivers). Only used for walking: the
+    /// picture of a real map comes from the map itself.
+    River,
 }
 
 impl Terrain {
@@ -24,7 +27,7 @@ impl Terrain {
     /// subterranean), which is also the order its transition calculator evaluates them in.
     pub fn priority(self) -> u8 {
         match self {
-            Terrain::Water => 0,
+            Terrain::Water | Terrain::River => 0,
             Terrain::Grass => 1,
             Terrain::Rough => 2,
             Terrain::Swamp => 3,
@@ -47,7 +50,7 @@ impl Terrain {
             Terrain::Lava => "lava",
             Terrain::Rough => "rough",
             Terrain::Subterranean => "subterranean",
-            Terrain::Water => "water",
+            Terrain::Water | Terrain::River => "water",
         }
     }
 }
@@ -104,6 +107,8 @@ pub struct World {
     taken: Vec<bool>,
     /// Tiles nobody can step on because an object stands there.
     blocked: Vec<bool>,
+    /// Tiles under a bridge: walkable even over water.
+    bridged: Vec<bool>,
 }
 
 impl World {
@@ -125,7 +130,11 @@ impl World {
     }
 
     pub fn passable(&self, p: Pos) -> bool {
-        self.contains(p) && self.tile(p).terrain != Terrain::Water && !self.blocked[self.index(p)]
+        if !self.contains(p) {
+            return false;
+        }
+        let i = self.index(p);
+        (self.tile(p).terrain != Terrain::Water || self.bridged[i]) && !self.blocked[i]
     }
 
     pub fn is_taken(&self, p: Pos) -> bool {
@@ -139,15 +148,21 @@ impl World {
         self.blocked[i] |= blocked;
     }
 
+    /// Mark a tile as covered by a bridge, so it can be crossed although it is water.
+    pub fn bridge(&mut self, p: Pos) {
+        let i = self.index(p);
+        self.bridged[i] = true;
+    }
+
     /// One level of a real map from a `.h4c` file, for walking around. The picture is drawn
     /// from the map itself (`TerrainView::build_map`); here only passability matters, so
-    /// rivers count as water and magic terrains as grass for now, and the corners outside the
-    /// map's diamond are water, which nobody can enter.
+    /// magic terrains count as grass, rivers are walkable (not checked against the game yet),
+    /// and the corners outside the map's diamond are water, which nobody can enter.
     pub fn from_map(map: &h4_formats::map::MapFile, level: usize) -> World {
         let size = map.header.size as i32;
         let blank = Tile { terrain: Terrain::Water, set: 0, road: None };
         let n = (size * size) as usize;
-        let mut w = World { width: size, height: size, tiles: vec![blank; n], taken: vec![false; n], blocked: vec![false; n] };
+        let mut w = World { width: size, height: size, tiles: vec![blank; n], taken: vec![false; n], blocked: vec![false; n], bridged: vec![false; n] };
         for row in 0..size {
             for col in 0..size {
                 let Some(t) = map.tile(level, row as usize, col as usize) else { continue };
@@ -161,7 +176,7 @@ impl World {
                     6 => Terrain::Sand,
                     7 => Terrain::Dirt,
                     8 => Terrain::Subterranean,
-                    9..=11 => Terrain::Water, // river, lava river, ice river
+                    9..=11 => Terrain::River, // river, lava river, ice river
                     _ => Terrain::Grass,      // grass and the special magic terrains
                 };
                 let road = Road::from_map(t.road);
@@ -186,7 +201,7 @@ impl World {
     pub fn generate(width: i32, height: i32) -> World {
         let blank = Tile { terrain: Terrain::Grass, set: 0, road: None };
         let n = (width * height) as usize;
-        let mut w = World { width, height, tiles: vec![blank; n], taken: vec![false; n], blocked: vec![false; n] };
+        let mut w = World { width, height, tiles: vec![blank; n], taken: vec![false; n], blocked: vec![false; n], bridged: vec![false; n] };
         for row in 0..height {
             for col in 0..width {
                 let p = Pos { col, row };

@@ -6,6 +6,7 @@
 //! keys: arrows/WASD — scroll, -/= — zoom, Space — centre on the hero
 
 mod actor_view;
+mod armies;
 mod mover;
 mod object_view;
 mod terrain_view;
@@ -74,7 +75,7 @@ fn map_objects(res: &Resources, world: &mut World, map: &h4_formats::map::MapFil
     let mut kinds: HashMap<&str, Option<Rc<ObjectKind>>> = HashMap::new();
     let mut placed = Vec::new();
     for o in &body.objects {
-        // armies (heroes, wandering creatures) are not drawn yet
+        // armies (heroes, wandering creatures) are put down by `armies::map_armies`
         let h4_formats::map_body::ObjectKind::Placed(p) = &o.kind else { continue };
         if o.level != level as i32 {
             continue;
@@ -85,9 +86,16 @@ fn map_objects(res: &Resources, world: &mut World, map: &h4_formats::map::MapFil
         // this way 77% of sand decorations stand on sand and bridges mostly on water,
         // the other way round only 27% and mostly on grass.
         let at = Pos { col: o.y, row: o.x };
+        // a bridge's cells are its deck: walkable, and over water too
+        let bridge = p.type_name == "bridge";
         for (cell, blocked) in kind.cells(at) {
             if world.contains(cell) {
-                world.take(cell, blocked);
+                if bridge {
+                    world.take(cell, false);
+                    world.bridge(cell);
+                } else {
+                    world.take(cell, blocked);
+                }
             }
         }
         placed.push(Placed { kind: kind.clone(), at });
@@ -190,7 +198,7 @@ async fn main() {
     };
 
     // H4_MAP=path/to/map.h4c (and H4_LEVEL=1 for underground): show a real map instead of
-    // the generated one: its terrain, roads and objects (armies and heroes not yet).
+    // the generated one: its terrain, roads, objects and armies.
     let real_map = std::env::var("H4_MAP").ok().map(|path| {
         let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
         h4_formats::map::MapFile::read(&bytes, &path).unwrap_or_else(|e| panic!("{e}"))
@@ -219,13 +227,17 @@ async fn main() {
         Some(map) => map_objects(&res, &mut world, map, level.min(map.header.levels as usize - 1)),
         None => Vec::new(),
     };
+    let map_armies = match &real_map {
+        Some(map) => armies::map_armies(&res, &mut world, map, level.min(map.header.levels as usize - 1), HERO),
+        None => Vec::new(),
+    };
 
     let spawn = |name: &str, col, row, facing| {
         let actor = actors.get(name).unwrap_or_else(|| panic!("no adv_actor.{name}"));
         Mover::new(actor, Pos { col, row }, facing)
     };
     let mut hero;
-    let mut creatures = Vec::new();
+    let mut creatures;
     if real_map.is_some() {
         // H4_START=col,row puts the hero (and so the first screenshot) at a chosen tile
         let chosen = std::env::var("H4_START").ok().and_then(|s| {
@@ -234,6 +246,7 @@ async fn main() {
         });
         let start = chosen.or_else(|| world.passable_near_center()).unwrap_or(Pos { col: 0, row: 0 });
         hero = spawn(HERO, start.col, start.row, "e");
+        creatures = map_armies.iter().map(|a| spawn(&a.actor, a.at.col, a.at.row, "sw")).collect();
     } else {
         hero = spawn(HERO, 3, 36, "e");
         creatures = vec![
