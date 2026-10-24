@@ -63,6 +63,37 @@ enum Upright<'a> {
     Strip(&'a Placed, Strip),
 }
 
+/// The objects of a real map on `level`, at the positions stored in the map. They are put
+/// down as they are (no check for free cells: the map maker already arranged them), and
+/// their cells are marked taken / blocked for the path finder.
+fn map_objects(res: &Resources, world: &mut World, map: &h4_formats::map::MapFile, level: usize) -> Vec<Placed> {
+    let Ok(body) = &map.body else {
+        eprintln!("objects not shown: {}", map.body.as_ref().err().unwrap());
+        return Vec::new();
+    };
+    let mut kinds: HashMap<&str, Option<Rc<ObjectKind>>> = HashMap::new();
+    let mut placed = Vec::new();
+    for o in &body.objects {
+        // armies (heroes, wandering creatures) are not drawn yet
+        let h4_formats::map_body::ObjectKind::Placed(p) = &o.kind else { continue };
+        if o.level != level as i32 {
+            continue;
+        }
+        let kind = kinds.entry(p.model.as_str()).or_insert_with(|| ObjectKind::load(res, &p.model).map(Rc::new));
+        let Some(kind) = kind else { continue };
+        // the stored x is our column, y our row (checked on screenshots: roads lead to the
+        // entrances of towns and mines)
+        let at = Pos { col: o.x, row: o.y };
+        for (cell, blocked) in kind.cells(at) {
+            if world.contains(cell) {
+                world.take(cell, blocked);
+            }
+        }
+        placed.push(Placed { kind: kind.clone(), at });
+    }
+    placed
+}
+
 /// Buildings placed by hand near the hero's start, then forests and mountains scattered
 /// over the terrain they belong to. Objects that don't fit (water, road, another object)
 /// are skipped.
@@ -158,7 +189,7 @@ async fn main() {
     };
 
     // H4_MAP=path/to/map.h4c (and H4_LEVEL=1 for underground): show a real map instead of
-    // the generated one. Only its terrain and roads are read so far, no objects.
+    // the generated one: its terrain, roads and objects (armies and heroes not yet).
     let real_map = std::env::var("H4_MAP").ok().map(|path| {
         let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
         h4_formats::map::MapFile::read(&bytes, &path).unwrap_or_else(|e| panic!("{e}"))
@@ -182,6 +213,11 @@ async fn main() {
         }
     };
     let actors = Actors::new(&res);
+    // a real map's own objects go down first, so the hero doesn't start inside one
+    let map_placed = match &real_map {
+        Some(map) => map_objects(&res, &mut world, map, level.min(map.header.levels as usize - 1)),
+        None => Vec::new(),
+    };
 
     let spawn = |name: &str, col, row, facing| {
         let actor = actors.get(name).unwrap_or_else(|| panic!("no adv_actor.{name}"));
@@ -190,7 +226,6 @@ async fn main() {
     let mut hero;
     let mut creatures = Vec::new();
     if real_map.is_some() {
-        // creatures of a real map come with its objects, which aren't read yet
         // H4_START=col,row puts the hero (and so the first screenshot) at a chosen tile
         let chosen = std::env::var("H4_START").ok().and_then(|s| {
             let (col, row) = s.split_once(',')?;
@@ -212,8 +247,8 @@ async fn main() {
     for m in creatures.iter().chain(std::iter::once(&hero)) {
         world.take(m.next_tile(), false);
     }
-    // a real map's objects aren't read yet; the sample objects only fit the generated map
-    let objects = if real_map.is_some() { Vec::new() } else { place_objects(&res, &mut world) };
+    // the sample objects only fit the generated map
+    let objects = if real_map.is_some() { map_placed } else { place_objects(&res, &mut world) };
     // H4_FOOTPRINTS=1: outline object cells (red: impassable) to check them against the art
     let show_footprints = std::env::var("H4_FOOTPRINTS").is_ok();
     let mut time = 0.0;
