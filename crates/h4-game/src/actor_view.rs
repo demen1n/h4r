@@ -53,7 +53,7 @@ impl Actor {
         let frames = (0..seq.frames.len())
             .map(|i| {
                 let t = Texture2D::from_rgba8(area.width() as u16, area.height() as u16, &seq.compose(i, area, true));
-                t.set_filter(FilterMode::Linear);
+                t.set_filter(FilterMode::Nearest);
                 t
             })
             .collect();

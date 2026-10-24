@@ -357,7 +357,7 @@ impl TerrainView {
                     part.extend_from_slice(&canvas[start..start + 4 * w]);
                 }
                 let t = Texture2D::from_rgba8(w as u16, h as u16, &part);
-                t.set_filter(FilterMode::Linear);
+                t.set_filter(FilterMode::Nearest);
                 chunks.push((vec2(cx as f32, cy as f32), t));
             }
         }

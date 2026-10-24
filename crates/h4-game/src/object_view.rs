@@ -42,7 +42,7 @@ impl Frames {
                     l.draw_onto(&mut buf, area);
                 }
                 let t = Texture2D::from_rgba8(area.width() as u16, area.height() as u16, &buf);
-                t.set_filter(FilterMode::Linear);
+                t.set_filter(FilterMode::Nearest);
                 t
             })
             .collect();
