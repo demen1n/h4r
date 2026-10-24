@@ -18,6 +18,9 @@
 //! A digit is 0 (not covered), 1 (from the edge before the corner, going clockwise from north),
 //! 2 (from the edge after it), 3 (both edges) or 4 (only the diagonal neighbour at the corner).
 //! See [`corner_code`].
+//!
+//! Maps (`.h4c`) store the transitions the editor chose for every tile as a mask set number
+//! (0..=19, see [`MAP_MASK_SETS`]) and the index of the mask within that set, in file order.
 
 use std::collections::HashMap;
 
@@ -69,9 +72,37 @@ impl Mask {
     }
 }
 
+/// Which named set each of the 20 mask set numbers stored in maps refers to: five numbers per
+/// kind of border, some of them sharing a set. This is the table at rva `6877a0` in our exe,
+/// which the game walks when it loads the masks (`FUN_008c6010`, rva `4c6010`).
+pub const MAP_MASK_SETS: [&str; 20] = [
+    "water_to_land 1",
+    "water_to_land 1",
+    "water_to_land 2",
+    "water_to_land 2",
+    "water_to_land 3",
+    "land_to_water 1",
+    "land_to_water 1",
+    "land_to_water 2",
+    "land_to_water 2",
+    "land_to_water 3",
+    "road 1",
+    "road 1",
+    "road 2",
+    "road 2",
+    "road 2",
+    "land 1",
+    "land 2",
+    "land 2",
+    "land 3",
+    "land 3",
+];
+
 /// All masks of the file: set name -> code -> mask.
 pub struct Transitions {
     pub sets: HashMap<String, HashMap<i32, Mask>>,
+    /// The codes of each set in file order: maps refer to masks by this position.
+    pub order: HashMap<String, Vec<i32>>,
 }
 
 impl Transitions {
@@ -79,10 +110,12 @@ impl Transitions {
         let mut r = Reader::new(data);
         let n = r.u8()?;
         let mut sets = HashMap::new();
+        let mut order = HashMap::new();
         for _ in 0..n {
             let name = r.str16()?;
             let count = r.u32()?;
             let mut masks = HashMap::new();
+            let mut codes = Vec::new();
             for _ in 0..count {
                 let code = r.i32()?;
                 let depth = r.u8()?;
@@ -92,13 +125,22 @@ impl Transitions {
                     d => return bad(format!("mask {code} in set {name:?} has unknown depth {d}")),
                 };
                 masks.insert(code, Mask::new(depth, r.take(size)?.to_vec()));
+                codes.push(code);
             }
+            order.insert(name.clone(), codes);
             sets.insert(name, masks);
         }
         if r.remaining() != 0 {
             return bad(format!("{} bytes left after transitions", r.remaining()));
         }
-        Ok(Transitions { sets })
+        Ok(Transitions { sets, order })
+    }
+
+    /// A mask as a map refers to it: mask set number (0..=19) and position within the set.
+    pub fn map_mask(&self, mask_set: u8, index: u16) -> Option<&Mask> {
+        let name = *MAP_MASK_SETS.get(mask_set as usize)?;
+        let code = *self.order.get(name)?.get(index as usize)?;
+        self.sets.get(name)?.get(&code)
     }
 
     /// The mask for `code` in a set; if the exact code isn't there, try without the corners

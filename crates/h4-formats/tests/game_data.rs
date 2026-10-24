@@ -11,7 +11,7 @@ use common::{assert_no_failures, names_with_prefix, resources};
 use h4_formats::adv_actor::AdvActorModel;
 use h4_formats::sprite::{read_bitmap_group, ActorSequence, Layer};
 use h4_formats::terrain::{column_height, Metatile, METATILE_SIZE, TILE_HEIGHT, TILE_WIDTH};
-use h4_formats::transition::Transitions;
+use h4_formats::transition::{Transitions, MAP_MASK_SETS};
 
 const ACTOR_SEQUENCES: usize = 13_336;
 // All archives together; the base game alone has fewer.
@@ -184,6 +184,12 @@ fn transition_masks() {
             if covered.filter(|&(x, y)| mask.alpha(x, y) > 0).count() == 0 {
                 failures.push(format!("{set:?}: mask {code} covers nothing"));
             }
+        }
+    }
+    // Maps refer to masks by one of 20 set numbers and a position in the set.
+    for (n, set) in MAP_MASK_SETS.iter().enumerate() {
+        if t.order.get(*set).map(Vec::len) != Some(MASKS_PER_SET) {
+            failures.push(format!("map mask set {n} names {set:?}, which has no {MASKS_PER_SET} masks"));
         }
     }
     assert_no_failures("transition masks", &failures);

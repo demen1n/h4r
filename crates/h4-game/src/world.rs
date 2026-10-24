@@ -68,6 +68,17 @@ impl Road {
             Road::Cobblestone => "cobblestone",
         }
     }
+
+    /// Road type as stored in maps: 1 gravel, 2 dirt, 3 cobblestone (the order of the exe's
+    /// road texture array at rva `58ca68`); 0 is no road.
+    pub fn from_map(road: u8) -> Option<Road> {
+        match road {
+            1 => Some(Road::Gravel),
+            2 => Some(Road::Dirt),
+            3 => Some(Road::Cobblestone),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -128,9 +139,10 @@ impl World {
         self.blocked[i] |= blocked;
     }
 
-    /// One level of a real map from a `.h4c` file. Only what the prototype can draw is kept:
-    /// river, lava and ice "terrains" become water and the magic terrains grass for now, and
-    /// the corners outside the map's diamond are filled with water.
+    /// One level of a real map from a `.h4c` file, for walking around. The picture is drawn
+    /// from the map itself (`TerrainView::build_map`); here only passability matters, so
+    /// rivers count as water and magic terrains as grass for now, and the corners outside the
+    /// map's diamond are water, which nobody can enter.
     pub fn from_map(map: &h4_formats::map::MapFile, level: usize) -> World {
         let size = map.header.size as i32;
         let blank = Tile { terrain: Terrain::Water, set: 0, road: None };
@@ -152,13 +164,7 @@ impl World {
                     9..=11 => Terrain::Water, // river, lava river, ice river
                     _ => Terrain::Grass,      // grass and the special magic terrains
                 };
-                // Which road type is which number is a guess, not checked against the game yet.
-                let road = match t.road {
-                    1 => Some(Road::Dirt),
-                    2 => Some(Road::Gravel),
-                    3 => Some(Road::Cobblestone),
-                    _ => None,
-                };
+                let road = Road::from_map(t.road);
                 *w.tile_mut(Pos { col, row }) = Tile { terrain, set: t.subtype, road };
             }
         }
