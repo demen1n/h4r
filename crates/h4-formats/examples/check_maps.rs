@@ -1,13 +1,17 @@
-//! Read every `.h4c` map of the installation: header, then tiles and heights.
-//! Prints one line per map and a summary of value ranges seen in the tiles.
+//! Read every `.h4c` map of the installation: header, events and objects, tiles and heights.
+//! Prints one line per map, then how many maps were read through to the tiles, which
+//! object types stopped the others, whether the tiles start where the search from the end
+//! puts them, and a summary of value ranges seen in the tiles.
 //!
 //! usage: cargo run --release --example check_maps -- [maps dir]
 //! (default: the `maps` folder next to the game's data folder)
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use h4_formats::archive::data_dir;
-use h4_formats::map::{MapFile, TERRAIN_NAMES};
+use h4_formats::map::{search_tiles_start, MapFile, TERRAIN_NAMES};
+use h4_formats::map_body::ObjectKind;
 
 fn main() {
     let dir = std::env::args()
@@ -25,6 +29,12 @@ fn main() {
     let mut max_id = 0;
     let mut roads = [0usize; 4];
     let mut rock = [0usize; 3];
+    // events and objects
+    let mut sequential = 0;
+    let mut offset_mismatch = Vec::new();
+    let mut blockers: BTreeMap<String, usize> = BTreeMap::new();
+    let mut object_types: BTreeMap<String, usize> = BTreeMap::new();
+    let (mut objects, mut armies, mut events) = (0, 0, 0);
     for path in &files {
         let name = path.file_name().unwrap().to_string_lossy().to_string();
         let bytes = std::fs::read(path).expect("read map");
@@ -37,6 +47,30 @@ fn main() {
         };
         ok += 1;
         let h = &map.header;
+        match &map.body {
+            Ok(body) => {
+                sequential += 1;
+                // the sequential read must agree with the search from the end
+                match search_tiles_start(&map) {
+                    Ok(s) if s == map.tiles_start => {}
+                    other => offset_mismatch.push(format!("{name}: objects end at {:#x}, search says {other:?}", map.tiles_start)),
+                }
+                let e = &body.events;
+                events += e.timed.len() + e.triggerable.len() + e.continuous.len() + e.placed.len();
+                for o in &body.objects {
+                    objects += 1;
+                    match &o.kind {
+                        ObjectKind::Army { .. } => armies += 1,
+                        ObjectKind::Placed(p) => *object_types.entry(p.type_name.clone()).or_default() += 1,
+                    }
+                }
+            }
+            Err(e) => {
+                // "... object type \"x\" ..." or another message: count by message start
+                let key = e.split(" at 0x").next().unwrap_or(e).to_string();
+                *blockers.entry(key).or_default() += 1;
+            }
+        }
 
         // terrain of each level, most common first
         let per_level = map.tiles.len() / h.levels as usize;
@@ -79,6 +113,24 @@ fn main() {
         );
     }
     println!("\n{ok}/{} maps read, {} failed", files.len(), failed.len());
+    println!("{sequential}/{ok} read through events and objects to the tiles");
+    println!("  {events} global events, {objects} objects ({armies} armies on the map)");
+    if offset_mismatch.is_empty() {
+        println!("  tiles start where the search from the end finds them on every one of them");
+    }
+    for m in &offset_mismatch {
+        println!("  MISMATCH {m}");
+    }
+    if !blockers.is_empty() {
+        println!("stopped by:");
+        let mut list: Vec<_> = blockers.iter().collect();
+        list.sort_by_key(|(_, n)| std::cmp::Reverse(**n));
+        for (what, n) in list {
+            println!("  {n:3}  {what}");
+        }
+    }
+    let types: Vec<String> = object_types.iter().map(|(t, n)| format!("{t} {n}")).collect();
+    println!("object types: {}", types.join(", "));
     for f in &failed {
         println!("  {f}");
     }
