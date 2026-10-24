@@ -124,6 +124,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "h4-game"
+version = "0.1.0"
+dependencies = [
+ "h4-formats",
+ "macroquad",
+]
+
+[[package]]
 name = "h4-viewer"
 version = "0.1.0"
 dependencies = [

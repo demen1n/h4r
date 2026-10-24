@@ -12,7 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("usage: h4-dump <actor> <action> <direction> <out.png> [data dir]");
         std::process::exit(2);
     }
-    let res = Resources::open(h4_viewer::data_dir(args.get(4).cloned()))?;
+    let res = Resources::open(h4_formats::archive::data_dir(args.get(4).cloned()))?;
     let actors = catalog::actors(&res);
     let actor = actors.get(&args[0].to_lowercase()).ok_or("no such actor")?;
     let name = actor

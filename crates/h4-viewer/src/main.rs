@@ -184,7 +184,7 @@ fn window_conf() -> Conf {
 
 #[macroquad::main(window_conf)]
 async fn main() {
-    let dir = h4_viewer::data_dir(std::env::args().nth(1));
+    let dir = h4_formats::archive::data_dir(std::env::args().nth(1));
     let res = match Resources::open(&dir) {
         Ok(r) => r,
         Err(e) => {

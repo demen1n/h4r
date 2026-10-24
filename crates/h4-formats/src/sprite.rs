@@ -14,7 +14,8 @@
 //!
 //! A bitmap group (`layers.*`) is a u16 count followed by layers. An actor sequence
 //! (`actor_sequence.*`) is u16 2, u16 version (2, or 3 followed by u16 k and k i32s), u16 count,
-//! then the frames and their shadows as layers, then 10 bytes we don't use yet.
+//! then the frames and their shadows as layers, then i32 x, i32 y (see [`ActorSequence::offset`])
+//! and u16 (unknown).
 
 use crate::reader::{bad, Reader};
 use crate::Result;
@@ -157,6 +158,9 @@ pub struct ActorSequence {
     pub frames: Vec<Layer>,
     /// Shadow for each frame, when present (layers named `shadow NNN`).
     pub shadows: Vec<Layer>,
+    /// Added to layer coordinates to put the actor's feet at (0, 0). Read from the two i32s
+    /// after the layers (they are about minus the middle-bottom of the frames).
+    pub offset: (i32, i32),
 }
 
 impl ActorSequence {
@@ -182,7 +186,8 @@ impl ActorSequence {
                 frames.push(l);
             }
         }
-        Ok(ActorSequence { frames, shadows })
+        let offset = (r.i32()?, r.i32()?);
+        Ok(ActorSequence { frames, shadows, offset })
     }
 
     /// Bounding box of all frames and shadows, so every frame can share one canvas.
