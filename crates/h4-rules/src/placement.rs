@@ -54,9 +54,10 @@ pub enum Placement {
     Teacher { skill: usize, model: String },
     /// An artifact (id, see [`crate::artifacts::KEYWORDS`]) lying on the map.
     Artifact { artifact: usize, model: String },
-    /// The heroes of an army, in stack order, as (base class, male) once random classes
-    /// and genders are chosen.
-    Heroes(Vec<(usize, bool)>),
+    /// What an army got: its heroes in stack order as (base class, male), once random
+    /// classes and genders are chosen, and the size of each stack the map left at 0, as
+    /// (stack index, count).
+    Army { heroes: Vec<(usize, bool)>, counts: Vec<(usize, i32)> },
 }
 
 impl Placement {
@@ -71,7 +72,7 @@ impl Placement {
             | Placement::Temple { model, .. }
             | Placement::Artifact { model, .. }
             | Placement::Teacher { model, .. } => Some(model),
-            Placement::Monster { .. } | Placement::Heroes(_) => None,
+            Placement::Monster { .. } | Placement::Army { .. } => None,
         }
     }
 }
@@ -212,6 +213,21 @@ pub fn place_random_objects(
     }
 
     // 1. pre-placement, pass 0, and 2. the put-aside objects until none is left
+    // 0. While the map is read, a creature stack stored with a count of 0 gets a random
+    // size (`t_creature::read`, rva `63dc20`), so these rolls come first, in file order.
+    for (i, o) in body.objects.iter().enumerate() {
+        let army = match &o.kind {
+            ObjectKind::Army { army, .. } => Some(army),
+            ObjectKind::Placed(p) => p.garrison.as_ref(),
+        };
+        let Some(army) = army else { continue };
+        let counts = state.random_stack_sizes(army, rng);
+        // garrisons (towns, mines) roll too, but we keep only the armies' sizes for now
+        if matches!(o.kind, ObjectKind::Army { .. }) && !counts.is_empty() {
+            state.result[i] = Some(Placement::Army { heroes: Vec::new(), counts });
+        }
+    }
+
     let mut later = Vec::new();
     for (i, o) in body.objects.iter().enumerate() {
         let wait = match &o.kind {
@@ -389,8 +405,29 @@ impl State<'_> {
             }
         }
         if !out.is_empty() {
-            self.result[i] = Some(Placement::Heroes(out));
+            match &mut self.result[i] {
+                Some(Placement::Army { heroes, .. }) => *heroes = out,
+                slot => *slot = Some(Placement::Army { heroes: out, counts: Vec::new() }),
+            }
         }
+    }
+
+    /// Sizes for the stacks of `army` stored with a count of 0 (rva `63dc20` calls `7f4500`
+    /// with the creature's level): a strength rolled between 0.8 and 1.2 of the level's
+    /// (as for random monsters, but without the difficulty factor), divided by the
+    /// creature's experience, at least 1. The game keeps the division's remainder as a
+    /// fraction of 256 (`+0xa4`); we drop it.
+    fn random_stack_sizes(&self, army: &Army, rng: &mut GlobalRandom) -> Vec<(usize, i32)> {
+        let mut out = Vec::new();
+        for (slot, s) in army.stacks.iter().enumerate() {
+            let Stack::Creatures { kind, count: 0, .. } = s else { continue };
+            let Some(c) = usize::try_from(*kind).ok().and_then(|k| self.creatures.get(k)) else { continue };
+            let Some((min, max)) = default_strength(c.level as usize) else { continue };
+            let strength = (rng.next() % (max - min + 1) as u32) as i32 + min;
+            let n = (strength * 256 / c.experience.max(1)).max(256) >> 8;
+            out.push((slot, n));
+        }
+        out
     }
 
     /// `t_random_town` pre-placement (rva `3f5310`): the linked alignment, or for "any"
