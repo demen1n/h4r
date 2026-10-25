@@ -6,6 +6,7 @@
 //!
 //! - [`random`]: the game's two random number generators, bit-exact.
 //! - [`damage`]: damage of one stack hitting another.
+//! - [`battle`]: a stand-in battle without a battlefield, and writing its result back.
 //! - [`artifacts`]: artifact numbering, models and random picks.
 //! - [`creatures`]: creature statistics from `table.creatures`.
 //! - [`heroes`]: hero classes and hero models on the map.
@@ -14,6 +15,7 @@
 //! - [`movement`]: armies walking on the map: step costs, movement points, paths.
 
 pub mod artifacts;
+pub mod battle;
 pub mod creatures;
 pub mod damage;
 pub mod heroes;
