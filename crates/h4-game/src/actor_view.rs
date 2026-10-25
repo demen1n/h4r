@@ -63,19 +63,6 @@ impl Actor {
         );
         Some(Animation { frames, origin, fps: fps.max(1.0) })
     }
-
-    /// Distance per second while playing a moving action (prewalk, walk, postwalk).
-    pub fn speed(&self, res: &Resources, action: &str, dir: &'static str) -> f32 {
-        let length = match action {
-            "prewalk" => self.model.prewalk_length,
-            "postwalk" => self.model.postwalk_length,
-            _ => self.model.walk_length,
-        } as f32;
-        match self.animation(res, action, dir) {
-            Some(a) if a.duration() > 0.0 => length / a.duration(),
-            _ => STEP_LENGTH * 2.0,
-        }
-    }
 }
 
 /// The actors in use, loaded by name on first use.
@@ -121,10 +108,12 @@ pub fn direction(dcol: i32, drow: i32) -> &'static str {
     }
 }
 
-/// Length of a step in a direction: n, s, e, w cross a tile corner to corner and are longer.
+/// Length of a step in a direction: n, s, e, w cross a tile corner to corner and count
+/// 48 instead of 32 (1.5 times, like their movement cost; a screen recording of the game
+/// shows the same ratio of step times).
 pub fn step_length(dir: &str) -> f32 {
     if dir.len() == 1 {
-        STEP_LENGTH * std::f32::consts::SQRT_2
+        STEP_LENGTH * 1.5
     } else {
         STEP_LENGTH
     }
