@@ -47,7 +47,7 @@ fn main() {
             Placement::Artifact { artifact, model } => format!("{} ({model})", h4_rules::artifacts::KEYWORDS[*artifact]),
             Placement::Army { heroes, counts } => {
                 let mut s: Vec<String> =
-                    heroes.iter().map(|&(c, m)| h4_rules::heroes::adv_model_name(c as i8, m as i8).unwrap_or_default()).collect();
+                    heroes.iter().flatten().map(|&(c, m)| h4_rules::heroes::adv_model_name(c as i8, m as i8).unwrap_or_default()).collect();
                 s.extend(counts.iter().map(|(slot, n)| format!("stack {slot}: {n}")));
                 s.join(", ")
             }

@@ -6,5 +6,8 @@ license.workspace = true
 description = "Game rules of Heroes of Might and Magic IV, without graphics"
 
 [dependencies]
-# only to load the game's tables (creature stats); the rules themselves don't read files
+# the game's tables (creature stats) and maps as read from the files; the rules
+# themselves don't open files
 h4-formats = { path = "../h4-formats" }
+# the game state the rules build and change
+h4-state = { path = "../h4-state" }

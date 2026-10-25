@@ -54,10 +54,11 @@ pub enum Placement {
     Teacher { skill: usize, model: String },
     /// An artifact (id, see [`crate::artifacts::KEYWORDS`]) lying on the map.
     Artifact { artifact: usize, model: String },
-    /// What an army got: its heroes in stack order as (base class, male), once random
-    /// classes and genders are chosen, and the size of each stack the map left at 0, as
-    /// (stack index, count).
-    Army { heroes: Vec<(usize, bool)>, counts: Vec<(usize, i32)> },
+    /// What an army got: one entry per hero in stack order, (base class, male) once random
+    /// classes and genders are chosen (`None` if still unknown: a hero with a portrait
+    /// but no class takes the portrait's, which we don't have yet), and the size of each
+    /// stack the map left at 0, as (stack index, count).
+    Army { heroes: Vec<Option<(usize, bool)>>, counts: Vec<(usize, i32)> },
 }
 
 impl Placement {
@@ -400,11 +401,9 @@ impl State<'_> {
                 // the standard hero for name and portrait
                 rng.next();
             }
-            if let (Some(c), Some(m)) = (class, male) {
-                out.push((c, m));
-            }
+            out.push(class.zip(male));
         }
-        if !out.is_empty() {
+        if out.iter().any(Option::is_some) {
             match &mut self.result[i] {
                 Some(Placement::Army { heroes, .. }) => *heroes = out,
                 slot => *slot = Some(Placement::Army { heroes: out, counts: Vec::new() }),

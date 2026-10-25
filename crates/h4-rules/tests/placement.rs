@@ -62,8 +62,8 @@ fn random_objects_of_all_maps() {
                 let random = army.stacks.iter().filter(|s| matches!(s, Stack::Hero(h) if h.portrait < 0)).count();
                 match result {
                     Some(Placement::Army { heroes: list, .. }) if random > 0 => {
-                        heroes += list.len();
-                        for &(class, male) in list {
+                        heroes += list.iter().flatten().count();
+                        for &(class, male) in list.iter().flatten() {
                             let model = h4_rules::heroes::adv_model_name(class as i8, male as i8).expect("base class");
                             if res.entry(&format!("adv_actor.{model}.h4d")).is_none() {
                                 failures.push(format!("{name}: no hero model {model}"));

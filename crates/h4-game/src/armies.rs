@@ -62,7 +62,7 @@ pub fn map_armies(
             // A hero the map leaves random got a class and gender in `placement`; one with
             // a portrait but no class keeps the default model for now.
             let chosen = match placements.get(i) {
-                Some(Some(Placement::Army { heroes, .. })) => heroes.first().copied(),
+                Some(Some(Placement::Army { heroes, .. })) => heroes.first().copied().flatten(),
                 _ => None,
             };
             let name = match chosen {

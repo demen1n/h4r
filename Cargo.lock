@@ -137,7 +137,12 @@ name = "h4-rules"
 version = "0.1.0"
 dependencies = [
  "h4-formats",
+ "h4-state",
 ]
+
+[[package]]
+name = "h4-state"
+version = "0.1.0"
 
 [[package]]
 name = "h4-viewer"
