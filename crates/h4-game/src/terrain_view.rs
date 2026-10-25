@@ -38,12 +38,13 @@ pub struct Iso {
 }
 
 impl Iso {
-    pub fn new(world: &World) -> Iso {
-        let origin_x = (world.height - 1) * TILE_WIDTH as i32 / 2;
+    /// A map of `cols` × `rows` tiles.
+    pub fn new(cols: i32, rows: i32) -> Iso {
+        let origin_x = (rows - 1) * TILE_WIDTH as i32 / 2;
         Iso {
             origin_x,
-            width: (world.width + world.height) * TILE_WIDTH as i32 / 2,
-            height: (world.width + world.height) * TILE_HEIGHT as i32 / 2 + TILE_HEIGHT as i32,
+            width: (cols + rows) * TILE_WIDTH as i32 / 2,
+            height: (cols + rows) * TILE_HEIGHT as i32 / 2 + TILE_HEIGHT as i32,
         }
     }
 

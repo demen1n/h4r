@@ -1,7 +1,9 @@
-//! The adventure map as data: terrain per tile, a test map generator and path finding.
-//! No drawing here.
+//! The hand-made test map: terrain per tile, roads, and which tiles objects take. No
+//! drawing here. Walking on it goes by the rules' state, made with [`World::ground`].
 
 use std::collections::VecDeque;
+
+use h4_state::map::AdventureMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Terrain {
@@ -16,9 +18,6 @@ pub enum Terrain {
     #[allow(dead_code)]
     Subterranean,
     Water,
-    /// Rivers of a real map (water, lava and ice rivers). Only used for walking: the
-    /// picture of a real map comes from the map itself.
-    River,
 }
 
 impl Terrain {
@@ -27,11 +26,26 @@ impl Terrain {
     /// subterranean), which is also the order its transition calculator evaluates them in.
     pub fn priority(self) -> u8 {
         match self {
-            Terrain::Water | Terrain::River => 0,
+            Terrain::Water => 0,
             Terrain::Grass => 1,
             Terrain::Rough => 2,
             Terrain::Swamp => 3,
             Terrain::Lava => 4,
+            Terrain::Snow => 5,
+            Terrain::Sand => 6,
+            Terrain::Dirt => 7,
+            Terrain::Subterranean => 8,
+        }
+    }
+
+    /// Id in the game's terrain enum (`h4_formats::map::TERRAIN_NAMES`), as the rules use it.
+    pub fn game_id(self) -> u8 {
+        match self {
+            Terrain::Water => 0,
+            Terrain::Grass => 1,
+            Terrain::Rough => 2,
+            Terrain::Swamp => 3,
+            Terrain::Lava => 4, // "volcanic"
             Terrain::Snow => 5,
             Terrain::Sand => 6,
             Terrain::Dirt => 7,
@@ -50,7 +64,7 @@ impl Terrain {
             Terrain::Lava => "lava",
             Terrain::Rough => "rough",
             Terrain::Subterranean => "subterranean",
-            Terrain::Water | Terrain::River => "water",
+            Terrain::Water => "water",
         }
     }
 }
@@ -82,6 +96,15 @@ impl Road {
             _ => None,
         }
     }
+
+    /// The other way round: the number maps and the rules use.
+    pub fn game_id(self) -> u8 {
+        match self {
+            Road::Gravel => 1,
+            Road::Dirt => 2,
+            Road::Cobblestone => 3,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -107,8 +130,6 @@ pub struct World {
     taken: Vec<bool>,
     /// Tiles nobody can step on because an object stands there.
     blocked: Vec<bool>,
-    /// Tiles under a bridge: walkable even over water.
-    bridged: Vec<bool>,
 }
 
 impl World {
@@ -134,7 +155,7 @@ impl World {
             return false;
         }
         let i = self.index(p);
-        (self.tile(p).terrain != Terrain::Water || self.bridged[i]) && !self.blocked[i]
+        self.tile(p).terrain != Terrain::Water && !self.blocked[i]
     }
 
     pub fn is_taken(&self, p: Pos) -> bool {
@@ -148,60 +169,30 @@ impl World {
         self.blocked[i] |= blocked;
     }
 
-    /// Mark a tile as covered by a bridge, so it can be crossed although it is water.
-    pub fn bridge(&mut self, p: Pos) {
-        let i = self.index(p);
-        self.bridged[i] = true;
-    }
-
-    /// One level of a real map from a `.h4c` file, for walking around. The picture is drawn
-    /// from the map itself (`TerrainView::build_map`); here only passability matters, so
-    /// magic terrains count as grass, rivers are walkable (not checked against the game yet),
-    /// and the corners outside the map's diamond are water, which nobody can enter.
-    pub fn from_map(map: &h4_formats::map::MapFile, level: usize) -> World {
-        let size = map.header.size as i32;
-        let blank = Tile { terrain: Terrain::Water, set: 0, road: None };
-        let n = (size * size) as usize;
-        let mut w = World { width: size, height: size, tiles: vec![blank; n], taken: vec![false; n], blocked: vec![false; n], bridged: vec![false; n] };
-        for row in 0..size {
-            for col in 0..size {
-                let Some(t) = map.tile(level, row as usize, col as usize) else { continue };
-                // indices of the game's terrain enum, see h4_formats::map::TERRAIN_NAMES
-                let terrain = match t.terrain {
-                    0 => Terrain::Water,
-                    2 => Terrain::Rough,
-                    3 => Terrain::Swamp,
-                    4 => Terrain::Lava, // "volcanic"; its pictures are terrain.lava.*
-                    5 => Terrain::Snow,
-                    6 => Terrain::Sand,
-                    7 => Terrain::Dirt,
-                    8 => Terrain::Subterranean,
-                    9..=11 => Terrain::River, // river, lava river, ice river
-                    _ => Terrain::Grass,      // grass and the special magic terrains
-                };
-                let road = Road::from_map(t.road);
-                *w.tile_mut(Pos { col, row }) = Tile { terrain, set: t.subtype, road };
+    /// The ground as the rules see it (`h4_state`), with the objects' blocked cells (the test
+    /// map has no bridges). The test map is square, as every map of the game is.
+    pub fn ground(&self) -> AdventureMap {
+        assert_eq!(self.width, self.height, "maps are square");
+        let mut ground = AdventureMap::new(self.width, 1);
+        for row in 0..self.height {
+            for col in 0..self.width {
+                let p = Pos { col, row };
+                let i = self.index(p);
+                let t = self.tile(p);
+                let tile = ground.tile_mut(h4_state::Pos { level: 0, row, col }).expect("same size as the world");
+                tile.terrain = t.terrain.game_id();
+                tile.road = t.road.map_or(0, Road::game_id);
+                tile.blocked = self.blocked[i];
             }
         }
-        w
-    }
-
-    /// A passable tile near the middle of the map, to put the hero on.
-    pub fn passable_near_center(&self) -> Option<Pos> {
-        let center = Pos { col: self.width / 2, row: self.height / 2 };
-        (0..self.width.max(self.height)).find_map(|r| {
-            (-r..=r).flat_map(|dr| (-r..=r).map(move |dc| (dc, dr))).find_map(|(dc, dr)| {
-                let p = Pos { col: center.col + dc, row: center.row + dr };
-                self.passable(p).then_some(p)
-            })
-        })
+        ground
     }
 
     /// A hand-made test map: grass with patches of other terrain, a lake and a road.
     pub fn generate(width: i32, height: i32) -> World {
         let blank = Tile { terrain: Terrain::Grass, set: 0, road: None };
         let n = (width * height) as usize;
-        let mut w = World { width, height, tiles: vec![blank; n], taken: vec![false; n], blocked: vec![false; n], bridged: vec![false; n] };
+        let mut w = World { width, height, tiles: vec![blank; n], taken: vec![false; n], blocked: vec![false; n] };
         for row in 0..height {
             for col in 0..width {
                 let p = Pos { col, row };
@@ -248,14 +239,10 @@ impl World {
         w
     }
 
-    /// Shortest 8-directional path from `from` to `to` over passable tiles, not including
-    /// `from`. Breadth-first search: every step costs the same, which is fine for a prototype.
-    pub fn find_path(&self, from: Pos, to: Pos) -> Option<Vec<Pos>> {
-        self.find_path_with(from, to, &NEIGHBOURS)
-    }
-
-    /// Like [`World::find_path`] with a choice of allowed steps. Roads use only the four
-    /// straight ones, so their tiles touch along edges instead of at corners.
+    /// Shortest path from `from` to `to` over passable tiles, not including `from`, with
+    /// `steps` allowed. Breadth-first search: every step costs the same. Only used to lay
+    /// roads on the test map, with the four straight steps, so their tiles touch along edges
+    /// instead of at corners (walking uses `h4_rules::movement::find_path`).
     fn find_path_with(&self, from: Pos, to: Pos, steps: &[(i32, i32)]) -> Option<Vec<Pos>> {
         if !self.passable(to) {
             return None;

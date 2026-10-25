@@ -8,4 +8,5 @@ description = "Adventure map prototype on Heroes of Might and Magic IV data"
 [dependencies]
 h4-formats = { path = "../h4-formats" }
 h4-rules = { path = "../h4-rules" }
+h4-state = { path = "../h4-state" }
 macroquad = "0.4"
