@@ -97,7 +97,7 @@ impl GameState {
     pub fn add_army(&mut self, owner: Option<Color>, at: Pos, army: army::Army) -> ArmyId {
         let id = ArmyId(self.next_army_id);
         self.next_army_id += 1;
-        self.armies.push(MapArmy { id, owner, at, army, move_points: 0 });
+        self.armies.push(MapArmy { id, owner, at, army, movement_left: [0.0; army::SLOTS] });
         id
     }
 

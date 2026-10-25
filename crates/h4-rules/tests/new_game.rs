@@ -9,6 +9,7 @@ use h4_formats::map::MapFile;
 use h4_formats::map_army::Stack;
 use h4_formats::map_body::ObjectKind;
 use h4_formats::table::Table;
+use h4_rules::movement;
 use h4_rules::new_game::{self, Footprint};
 use h4_rules::placement::{place_random_objects, Setup};
 use h4_rules::random::GlobalRandom;
@@ -45,6 +46,7 @@ fn states_of_all_maps() {
     let mut failures = Vec::new();
     let (mut armies, mut blocked_tiles) = (0, 0);
     let mut on_objects = Vec::new();
+    let (mut paths, mut unreachable_monsters) = (0, 0);
     for path in &files {
         let name = path.file_name().unwrap().to_string_lossy().to_string();
         let map = MapFile::read(&std::fs::read(path).unwrap(), &name).unwrap();
@@ -91,6 +93,46 @@ fn states_of_all_maps() {
                 failures.push(format!("{name}: bad stack {s:?}"));
             }
         }
+        // Every player's army has a day's movement in the formula's range, and can find
+        // a way to the nearest monster on its level if there is one; each step of the way
+        // touches the one before and can be entered.
+        let mut state = state;
+        for i in 0..state.armies.len() {
+            movement::refresh_movement(&mut state.armies[i], &stats);
+        }
+        for a in state.armies.iter().filter(|a| a.owner.is_some()) {
+            let full = movement::max_movement(&a.army, &stats);
+            if !(1200..=3000).contains(&full) || movement::movement_left(a, &stats) != full {
+                failures.push(format!("{name}: army {:?} has {full} movement", a.id));
+            }
+            let nearest = state
+                .armies
+                .iter()
+                .filter(|m| m.owner.is_none() && m.at.level == a.at.level)
+                .min_by_key(|m| (m.at.row - a.at.row).abs().max((m.at.col - a.at.col).abs()));
+            let Some(monster) = nearest else { continue };
+            let Some(path) = movement::find_path(&state, a.id, monster.at, &stats) else {
+                unreachable_monsters += 1;
+                continue;
+            };
+            paths += 1;
+            let mut prev = a.at;
+            for (n, &p) in path.iter().enumerate() {
+                let touching = (p.row - prev.row).abs() <= 1 && (p.col - prev.col).abs() <= 1 && p != prev;
+                let last = n + 1 == path.len();
+                let ok = match movement::obstacle(&state, a, p) {
+                    movement::Obstacle::None => !last || p == monster.at,
+                    movement::Obstacle::Enemy(id) => last && id == monster.id,
+                    _ => false,
+                };
+                if !touching || !ok {
+                    failures.push(format!("{name}: bad step {n} {p:?} on the way of {:?} to {:?}", a.id, monster.at));
+                    break;
+                }
+                prev = p;
+            }
+        }
+
         for level in 0..state.map.levels {
             for row in 0..state.map.size {
                 for col in 0..state.map.size {
@@ -102,6 +144,7 @@ fn states_of_all_maps() {
     }
     println!("{} maps, {armies} armies, {blocked_tiles} blocked tiles", files.len());
     println!("{} armies stand on a blocking object: {on_objects:?}", on_objects.len());
+    println!("{paths} paths to the nearest monster, {unreachable_monsters} monsters out of reach");
     assert!(armies > 5000, "only {armies} armies");
     // a few are the maps' own quirks, many would mean footprints are put down wrong
     assert!(on_objects.len() * 100 < armies, "{} armies on blocked tiles", on_objects.len());

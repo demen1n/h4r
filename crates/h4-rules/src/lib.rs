@@ -11,11 +11,13 @@
 //! - [`heroes`]: hero classes and hero models on the map.
 //! - [`placement`]: what the random objects of a map become when a game starts.
 //! - [`new_game`]: the [`h4_state::GameState`] of a map on day 1.
+//! - [`movement`]: armies walking on the map: step costs, movement points, paths.
 
 pub mod artifacts;
 pub mod creatures;
 pub mod damage;
 pub mod heroes;
+pub mod movement;
 pub mod new_game;
 pub mod placement;
 pub mod random;

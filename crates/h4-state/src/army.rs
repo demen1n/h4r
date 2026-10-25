@@ -87,8 +87,11 @@ pub struct MapArmy {
     pub owner: Option<Color>,
     pub at: Pos,
     pub army: Army,
-    /// Movement left this turn. Filled in by the rules at the start of each turn.
-    pub move_points: i32,
+    /// Movement left this turn, per slot, each in the slot's own units: the game keeps a
+    /// float per stack (`+0x70`), full is the stack's raw movement, and the army's
+    /// movement is worked out from all of them (`h4_rules::movement`). Filled in by the
+    /// rules at the start of each day; 0 for empty slots.
+    pub movement_left: [f32; SLOTS],
 }
 
 #[cfg(test)]
