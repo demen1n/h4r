@@ -72,8 +72,10 @@ pub struct MapHeader {
     pub size: u16,
     /// 1, or 2 with an underground level.
     pub levels: u8,
-    /// Meaning unknown; many maps share the same values (0x4b40, 0x4cad...).
-    pub unknown_b: u32,
+    /// Seed of the terrain mosaic: which metatile of each pair every 4x4 block of tiles
+    /// shows and how blocks overlap (`t_metatile_map`, rva `395400`; hint from openh4,
+    /// checked in our exe). Many maps share values (0x4b40, 0x4cad...).
+    pub terrain_seed: u32,
     pub players: Vec<PlayerSlot>,
     pub name: String,
     /// 0..=4. Probably the difficulty (the game has five levels) - unconfirmed.
@@ -255,7 +257,7 @@ impl MapHeader {
         let expansion = if version >= 28 { r.u16()? } else { 0 };
         let size = r.u16()?;
         let levels = r.u8()?;
-        let unknown_b = r.u32()?;
+        let terrain_seed = r.u32()?;
 
         let count = r.u8()?;
         if count == 0 || count > 6 {
@@ -319,7 +321,7 @@ impl MapHeader {
             expansion,
             size,
             levels,
-            unknown_b,
+            terrain_seed,
             players,
             name,
             difficulty,

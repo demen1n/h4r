@@ -7,6 +7,7 @@
 
 mod actor_view;
 mod armies;
+mod mosaic;
 mod mover;
 mod object_view;
 mod terrain_view;

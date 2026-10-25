@@ -18,6 +18,7 @@ use std::collections::HashMap;
 
 use h4_formats::archive::Resources;
 use h4_formats::map::MapFile;
+use crate::mosaic::Mosaic;
 use h4_formats::terrain::{Metatile, METATILE_SIZE, TILE_HEIGHT, TILE_WIDTH};
 use h4_formats::transition::{corner_code, Mask, Neighbours, Transitions};
 use macroquad::prelude::*;
@@ -72,6 +73,18 @@ impl Iso {
 struct Metatiles<'a> {
     res: &'a Resources,
     loaded: HashMap<String, Metatile>,
+    /// For a real map: the game's layout of metatiles, and the level drawn. Without it
+    /// (the generated map) metatiles are laid every `STEP` tiles in a checkerboard.
+    mosaic: Option<(&'a Mosaic, i32)>,
+}
+
+/// What a tile picture is of, so the mosaic can say which metatile of the pair a block uses.
+#[derive(Clone, Copy)]
+enum Kind {
+    Terrain(u8, u8),
+    Road(u8),
+    /// The generated map, which has no mosaic.
+    Generated,
 }
 
 impl Metatiles<'_> {
@@ -86,8 +99,20 @@ impl Metatiles<'_> {
     /// One map tile of a terrain (or road) as a 64x32 RGBA picture, put together from the
     /// four metatiles that overlap at that spot. `name(alt)` is the resource name of the
     /// set's first (`alt` 0) or second metatile.
-    fn tile(&mut self, p: Pos, name: impl Fn(u8) -> String) -> Result<Vec<u8>, String> {
+    fn tile(&mut self, p: Pos, kind: Kind, name: impl Fn(u8) -> String) -> Result<Vec<u8>, String> {
         let mut buf = vec![0u8; TILE_BYTES];
+        if let Some((mosaic, level)) = self.mosaic {
+            for paint in mosaic.paints(p.row, p.col, level) {
+                let alt = match kind {
+                    Kind::Terrain(t, s) => paint.block.terrain_picture(t, s),
+                    Kind::Road(r) => paint.block.road_picture(r),
+                    Kind::Generated => 0,
+                };
+                let m = self.get(&name(alt))?;
+                m.draw_tile(m.tile(paint.row, paint.col), &mut buf, TILE_WIDTH, 0, 0);
+            }
+            return Ok(buf);
+        }
         // metatile anchors (multiples of STEP) whose 10x10 area contains this tile
         let anchors = |v: i32| {
             let a = v.div_euclid(STEP) * STEP;
@@ -125,22 +150,23 @@ impl Metatiles<'_> {
         // Resource names from the texture tables of the exe (rva 397b70 and its neighbours).
         // The terrains with two looks have `<name>.<subtype>.<alt>`, the others `<name>.<alt>`.
         let pair = |base: String| move |alt: u8| format!("terrain.{base}.{}.h4d", alt + 1);
+        let kind = Kind::Terrain(terrain, subtype);
         match terrain {
             0..=8 => {
                 // water, grass, rough, swamp, volcanic, snow, sand, dirt, subterranean
                 let names = ["water", "grass", "rough", "swamp", "lava", "snow", "sand", "dirt", "subterranean"];
-                self.tile(p, pair(format!("{}.{}", names[terrain as usize], subtype + 1)))
+                self.tile(p, kind, pair(format!("{}.{}", names[terrain as usize], subtype + 1)))
             }
-            9 => self.tile(p, pair("river.water".into())),
-            10 => self.tile(p, pair("river.lava".into())),
-            11 => self.tile(p, pair("river.ice".into())),
+            9 => self.tile(p, kind, pair("river.water".into())),
+            10 => self.tile(p, kind, pair("river.lava".into())),
+            11 => self.tile(p, kind, pair("river.ice".into())),
             12 => self.single_tile(p, "terrain.magic.all.h4d"),
             13 => self.single_tile(p, "terrain.magic.life.h4d"),
             14 => self.single_tile(p, "terrain.magic.order.h4d"),
-            15 => self.tile(p, pair("magic.death".into())),
-            16 => self.tile(p, pair("magic.chaos".into())),
-            17 => self.tile(p, pair("magic.nature".into())),
-            18 => self.tile(p, pair("special.personal_combat".into())),
+            15 => self.tile(p, kind, pair("magic.death".into())),
+            16 => self.tile(p, kind, pair("magic.chaos".into())),
+            17 => self.tile(p, kind, pair("magic.nature".into())),
+            18 => self.tile(p, kind, pair("special.personal_combat".into())),
             t => Err(format!("unknown terrain {t}")),
         }
     }
@@ -148,7 +174,7 @@ impl Metatiles<'_> {
     /// A tile of road type 1..=3 as stored in maps.
     fn map_road(&mut self, p: Pos, road: u8) -> Result<Vec<u8>, String> {
         let road = Road::from_map(road).ok_or_else(|| format!("unknown road {road}"))?;
-        self.tile(p, |alt| road_name(road, alt))
+        self.tile(p, Kind::Road(road as u8), |alt| road_name(road, alt))
     }
 }
 
@@ -233,7 +259,7 @@ impl TerrainView {
             .read("transition.Transitions.h4d")
             .and_then(|d| Transitions::read(&d))
             .map_err(|e| format!("transitions: {e}"))?;
-        let mut metatiles = Metatiles { res, loaded: HashMap::new() };
+        let mut metatiles = Metatiles { res, loaded: HashMap::new(), mosaic: None };
         let width = iso.width as usize;
         let mut canvas = vec![0u8; 4 * width * iso.height as usize];
 
@@ -244,7 +270,7 @@ impl TerrainView {
                 let (x, y) = iso.tile_corner(p);
 
                 // the tile's own terrain
-                let base = metatiles.tile(p, |alt| terrain_name(here.terrain, here.set, alt))?;
+                let base = metatiles.tile(p, Kind::Generated, |alt| terrain_name(here.terrain, here.set, alt))?;
                 blend(&mut canvas, width, x, y, &base, |_, _| 255);
 
                 // higher terrains around it spill over its edges, lowest first
@@ -270,12 +296,12 @@ impl TerrainView {
                         _ => format!("land {}", 1 + tile_hash(p) % 3),
                     };
                     let Some(mask) = transitions.mask(&set, code) else { continue };
-                    let texture = metatiles.tile(p, |alt| terrain_name(t.0, t.1, alt))?;
+                    let texture = metatiles.tile(p, Kind::Generated, |alt| terrain_name(t.0, t.1, alt))?;
                     blend(&mut canvas, width, x, y, &texture, |mx, my| mask.alpha(mx, my));
                 }
 
                 if let Some(road) = here.road {
-                    let texture = metatiles.tile(p, |alt| road_name(road, alt))?;
+                    let texture = metatiles.tile(p, Kind::Generated, |alt| road_name(road, alt))?;
                     blend(&mut canvas, width, x, y, &texture, |_, _| 255);
                 }
             }
@@ -292,7 +318,8 @@ impl TerrainView {
             .and_then(|d| Transitions::read(&d))
             .map_err(|e| format!("transitions: {e}"))?;
         let mask = |set: u8, id: u16| transitions.map_mask(set, id).ok_or_else(|| format!("no mask {id} in mask set {set}"));
-        let mut metatiles = Metatiles { res, loaded: HashMap::new() };
+        let mosaic = Mosaic::new(map);
+        let mut metatiles = Metatiles { res, loaded: HashMap::new(), mosaic: Some((&mosaic, level as i32)) };
         let width = iso.width as usize;
         let mut canvas = vec![0u8; 4 * width * iso.height as usize];
         let size = map.header.size as i32;
