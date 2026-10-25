@@ -107,13 +107,20 @@ impl ObjectKind {
 pub struct Placed {
     pub kind: Rc<ObjectKind>,
     pub at: Pos,
+    /// How many pixels the object stands above flat ground (`Relief::object_height`).
+    pub lift: f32,
 }
 
 impl Placed {
-    /// Map pixel of the anchor: the top corner of the first footprint cell.
-    fn anchor(&self, iso: &Iso) -> Vec2 {
+    /// Map pixel of the anchor on flat ground: the top corner of the first footprint cell.
+    fn flat_anchor(&self, iso: &Iso) -> Vec2 {
         let c = iso.tile_center(self.at);
         vec2(c.x, c.y - 16.0)
+    }
+
+    /// Where the anchor is drawn: lifted with the ground under the object.
+    fn anchor(&self, iso: &Iso) -> Vec2 {
+        self.flat_anchor(iso) - vec2(0.0, self.lift)
     }
 
     /// Whether any of the object's picture or shadow is inside the window. A real map has
@@ -142,7 +149,7 @@ impl Placed {
     /// a larger key is closer to the viewer and is drawn later.
     pub fn strips(&self, iso: &Iso) -> Vec<Strip> {
         let Some(image) = &self.kind.image else { return Vec::new() };
-        let anchor = self.anchor(iso);
+        let flat_y = self.flat_anchor(iso).y;
         let left_column = image.area.left.div_euclid(COLUMN_WIDTH);
         let mut out = Vec::new();
         for (i, &depth) in self.kind.model.column_depths.iter().enumerate() {
@@ -154,7 +161,8 @@ impl Placed {
             // A depth of -(n + 1) means the column's front is the footprint cell n diagonal
             // steps below the first one, whose centre lies 16 * (n + 1) pixels below the
             // anchor. That is -16 * depth; flat decals have 0 and sort behind everything.
-            let key = anchor.y - 16.0 * depth as f32;
+            // The key is taken on flat ground: lifting moves the picture, not its depth.
+            let key = flat_y - 16.0 * depth as f32;
             out.push(Strip { x0, x1, key });
         }
         out
@@ -193,5 +201,5 @@ pub fn place(world: &mut World, kind: &Rc<ObjectKind>, at: Pos) -> Option<Placed
     for (p, blocked) in cells {
         world.take(p, blocked);
     }
-    Some(Placed { kind: kind.clone(), at })
+    Some(Placed { kind: kind.clone(), at, lift: 0.0 })
 }

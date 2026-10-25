@@ -19,6 +19,7 @@ use std::collections::HashMap;
 use h4_formats::archive::Resources;
 use h4_formats::map::MapFile;
 use crate::mosaic::Mosaic;
+use crate::relief::Relief;
 use h4_formats::terrain::{Metatile, METATILE_SIZE, TILE_HEIGHT, TILE_WIDTH};
 use h4_formats::transition::{corner_code, Mask, Neighbours, Transitions};
 use macroquad::prelude::*;
@@ -33,26 +34,29 @@ const TILE_BYTES: usize = 4 * TILE_WIDTH * TILE_HEIGHT;
 pub struct Iso {
     /// Shift that puts the leftmost tile at x = 0.
     origin_x: i32,
+    /// Room above the top tile for ground raised by its height (`crate::relief`).
+    origin_y: i32,
     pub width: i32,
     pub height: i32,
 }
 
 impl Iso {
-    /// A map of `cols` × `rows` tiles.
-    pub fn new(cols: i32, rows: i32) -> Iso {
+    /// A map of `cols` × `rows` tiles, with `top` pixels of room above it for raised ground.
+    pub fn new(cols: i32, rows: i32, top: i32) -> Iso {
         let origin_x = (rows - 1) * TILE_WIDTH as i32 / 2;
         Iso {
             origin_x,
+            origin_y: top,
             width: (cols + rows) * TILE_WIDTH as i32 / 2,
-            height: (cols + rows) * TILE_HEIGHT as i32 / 2 + TILE_HEIGHT as i32,
+            height: top + (cols + rows) * TILE_HEIGHT as i32 / 2 + TILE_HEIGHT as i32,
         }
     }
 
-    /// Top-left corner of the tile's 64x32 box.
+    /// Top-left corner of the tile's 64x32 box, on flat ground.
     pub fn tile_corner(&self, p: Pos) -> (i32, i32) {
         (
             self.origin_x + (p.col - p.row) * TILE_WIDTH as i32 / 2,
-            (p.col + p.row) * TILE_HEIGHT as i32 / 2,
+            self.origin_y + (p.col + p.row) * TILE_HEIGHT as i32 / 2,
         )
     }
 
@@ -62,10 +66,11 @@ impl Iso {
         vec2((x + TILE_WIDTH as i32 / 2) as f32, (y + TILE_HEIGHT as i32 / 2) as f32)
     }
 
-    /// The tile whose diamond contains map pixel (x, y).
+    /// The tile whose flat diamond contains map pixel (x, y). With raised ground, see
+    /// `Relief::pick`.
     pub fn tile_at(&self, x: f32, y: f32) -> Pos {
         let u = (x - self.origin_x as f32 - TILE_WIDTH as f32 / 2.0) / (TILE_WIDTH as f32 / 2.0);
-        let v = (y - TILE_HEIGHT as f32 / 2.0) / (TILE_HEIGHT as f32 / 2.0);
+        let v = (y - self.origin_y as f32 - TILE_HEIGHT as f32 / 2.0) / (TILE_HEIGHT as f32 / 2.0);
         Pos { col: ((u + v) / 2.0).round() as i32, row: ((v - u) / 2.0).round() as i32 }
     }
 }
@@ -386,9 +391,10 @@ impl TerrainView {
         Ok(TerrainView::from_canvas(&canvas, iso))
     }
 
-    /// Draw one level of a real map by the transitions stored in its tiles. Tiles outside the
-    /// map's diamond aren't drawn.
-    pub fn build_map(res: &Resources, map: &MapFile, level: usize, iso: &Iso) -> Result<TerrainView, String> {
+    /// Draw one level of a real map by the transitions stored in its tiles, lit and raised
+    /// by its heights (`relief`; `iso` must leave room for them above the map). Tiles outside
+    /// the map's diamond aren't drawn.
+    pub fn build_map(res: &Resources, map: &MapFile, level: usize, iso: &Iso, relief: &Relief) -> Result<TerrainView, String> {
         let transitions = res
             .read("transition.Transitions.h4d")
             .and_then(|d| Transitions::read(&d))
@@ -442,7 +448,9 @@ impl TerrainView {
                 }
             }
         }
+        // light first, on flat ground, as the game lights vertices before it raises them
         shade_by_height(&mut canvas, width, map, level, iso);
+        relief.raise(&mut canvas, width, iso);
         Ok(TerrainView::from_canvas(&canvas, iso))
     }
 
@@ -538,12 +546,11 @@ fn light_level(light: i32, x: i32, y: i32) -> i32 {
 
 /// Light and shade the ground by the map's vertex heights, with the exe's formulas
 /// (`decomp/heights.md`): every vertex gets a light from the slopes along its row, and
-/// the pixels of a tile take it from the tile's corners. The ground is not raised yet,
-/// as the game does: here it stays flat and only the light shows the hills.
+/// the pixels of a tile take it from the tile's corners.
 ///
 /// How the game spreads the corner lights over a tile isn't decompiled yet; here it is
 /// linear over the two triangles the game cuts a tile into for raising it (split along
-/// the vertical diagonal).
+/// the vertical diagonal). The ground is raised afterwards (`Relief::raise`).
 fn shade_by_height(canvas: &mut [u8], width: usize, map: &MapFile, level: usize, iso: &Iso) {
     let size = map.header.size as i32;
     for row in 0..size {

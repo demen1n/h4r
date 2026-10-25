@@ -14,6 +14,7 @@ mod mosaic;
 mod mover;
 mod object_view;
 mod play;
+mod relief;
 mod terrain_view;
 mod world;
 
@@ -37,6 +38,7 @@ use armies::ArmyLooks;
 use mover::Mover;
 use object_view::{ObjectKind, Placed, Strip};
 use play::{view_pos, Hover, Play};
+use relief::Relief;
 use terrain_view::{Iso, TerrainView};
 use world::{Pos, Terrain, World};
 
@@ -60,11 +62,9 @@ impl Camera {
     }
 }
 
-/// Outline of a tile's diamond.
-fn draw_diamond(camera: &Camera, iso: &Iso, p: Pos, color: Color) {
-    let c = camera.to_screen(iso.tile_center(p));
-    let (hw, hh) = (32.0 * camera.zoom, 16.0 * camera.zoom);
-    let corners = [c + vec2(0.0, -hh), c + vec2(hw, 0.0), c + vec2(0.0, hh), c + vec2(-hw, 0.0)];
+/// Outline of a tile's diamond, raised with the ground.
+fn draw_diamond(camera: &Camera, iso: &Iso, relief: &Relief, p: Pos, color: Color) {
+    let corners = relief.diamond(iso, p).map(|c| camera.to_screen(c));
     for i in 0..4 {
         let (a, b) = (corners[i], corners[(i + 1) % 4]);
         draw_line(a.x, a.y, b.x, b.y, 1.5, color);
@@ -100,15 +100,18 @@ enum Upright<'a> {
     Strip(&'a Placed, Strip),
 }
 
-/// The objects of the game on `level`, ready to draw. Each model is loaded once and shared
-/// by every copy on the map.
-fn placed_objects(res: &Resources, state: &GameState, level: u8) -> Vec<Placed> {
+/// The objects of the game on `level`, ready to draw and lifted with the ground under them.
+/// Each model is loaded once and shared by every copy on the map.
+fn placed_objects(res: &Resources, state: &GameState, level: u8, relief: &Relief) -> Vec<Placed> {
     let mut kinds: HashMap<&str, Option<Rc<ObjectKind>>> = HashMap::new();
     let mut placed = Vec::new();
     for o in state.objects.iter().filter(|o| o.at.level == level) {
         let kind = kinds.entry(&o.model).or_insert_with(|| ObjectKind::load(res, &o.model).map(Rc::new));
         if let Some(kind) = kind {
-            placed.push(Placed { kind: kind.clone(), at: view_pos(o.at) });
+            let at = view_pos(o.at);
+            // the footprint's x runs along rows, y along columns
+            let lift = relief.object_height(at, kind.model.width as i32, kind.model.height as i32) as f32;
+            placed.push(Placed { kind: kind.clone(), at, lift });
         }
     }
     placed
@@ -266,10 +269,12 @@ fn place_objects(res: &Resources, world: &mut World) -> Vec<Placed> {
     placed
 }
 
-fn draw_mover(res: &Resources, camera: &Camera, iso: &Iso, m: &Mover) {
+fn draw_mover(res: &Resources, camera: &Camera, iso: &Iso, relief: &Relief, m: &Mover) {
     let Some((anim, i)) = m.frame(res) else { return };
     let frame = &anim.frames[i];
-    let at = camera.to_screen(m.feet(iso) + anim.origin);
+    // standing on the raised ground, and following it while walking
+    let feet = m.feet(iso);
+    let at = camera.to_screen(feet - vec2(0.0, relief.ground_at(iso, feet)) + anim.origin);
     let size = frame.size() * camera.zoom;
     draw_texture_ex(frame, at.x, at.y, WHITE, DrawTextureParams { dest_size: Some(size), ..Default::default() });
 }
@@ -311,25 +316,29 @@ async fn main() {
         h4_formats::map::MapFile::read(&bytes, &path).unwrap_or_else(|e| panic!("{e}"))
     });
     let chosen_level: u8 = std::env::var("H4_LEVEL").ok().and_then(|l| l.parse().ok()).unwrap_or(0);
-    let (mut state, level, iso, terrain, objects) = match &real_map {
+    let (mut state, level, iso, relief, terrain, objects) = match &real_map {
         Some(map) => {
             // what the random objects become, as the game decides at the start (normal difficulty)
             let setup = Setup::from_header(&map.header, 1);
             let placements = place_random_objects(map, &stats, &arts, &setup, &mut rng);
             let state = new_game::from_map(map, &placements, footprints(&res));
             let level = chosen_level.min(map.header.levels.saturating_sub(1));
-            let iso = Iso::new(state.map.size, state.map.size);
+            let relief = Relief::from_map(map, level as usize);
+            // room above the map for the highest raised ground
+            let iso = Iso::new(state.map.size, state.map.size, relief.max());
             // a real map is drawn by the transitions stored in it
-            let terrain = TerrainView::build_map(&res, map, level as usize, &iso);
-            let objects = placed_objects(&res, &state, level);
-            (state, level, iso, terrain, objects)
+            let terrain = TerrainView::build_map(&res, map, level as usize, &iso, &relief);
+            let objects = placed_objects(&res, &state, level, &relief);
+            (state, level, iso, relief, terrain, objects)
         }
         None => {
             let (state, world, objects) = test_game(&res);
-            let iso = Iso::new(world.width, world.height);
+            // the test map is flat
+            let relief = Relief::flat(world.width);
+            let iso = Iso::new(world.width, world.height, 0);
             // the test map works its transitions out
             let terrain = TerrainView::build(&res, &world, &iso);
-            (state, 0, iso, terrain, objects)
+            (state, 0, iso, relief, terrain, objects)
         }
     };
     let terrain = terrain.unwrap_or_else(|e| {
@@ -364,7 +373,12 @@ async fn main() {
     // 1.28 looks closest; zoom 1 is too small, 2 too coarse.
     let mut camera = Camera { pos: Vec2::ZERO, zoom: 1.28 };
     let map_center = vec2(iso.width as f32, iso.height as f32) / 2.0;
-    camera.center_on(play.selected_figure().map_or(map_center, |f| f.feet(&iso)));
+    // where a figure shows: its feet on the raised ground
+    let shown_at = |f: &Mover| {
+        let feet = f.feet(&iso);
+        feet - vec2(0.0, relief.ground_at(&iso, feet))
+    };
+    camera.center_on(play.selected_figure().map_or(map_center, shown_at));
     // H4_OVERVIEW=1: start zoomed out over the whole map (handy with H4_SCREENSHOT)
     if std::env::var("H4_OVERVIEW").is_ok() {
         camera.zoom = (screen_width() / iso.width as f32).min(screen_height() / iso.height as f32);
@@ -426,10 +440,7 @@ async fn main() {
         }
 
         // orders
-        let hover = {
-            let m = camera.to_map(mouse);
-            iso.tile_at(m.x, m.y)
-        };
+        let hover = relief.pick(&iso, camera.to_map(mouse));
         let order = if play.busy() { None } else { orders.pop() };
         if let Some(order) = &order {
             println!("order {order:?}");
@@ -449,7 +460,7 @@ async fn main() {
         if order.is_some() || is_key_pressed(KeyCode::Tab) || is_key_pressed(KeyCode::Enter) {
             // follow the selected army
             if let Some(f) = play.selected_figure() {
-                camera.center_on(f.feet(&iso));
+                camera.center_on(shown_at(f));
             }
         }
         if is_key_pressed(KeyCode::Tab) {
@@ -460,7 +471,7 @@ async fn main() {
         }
         if is_key_pressed(KeyCode::Space) {
             if let Some(f) = play.selected_figure() {
-                camera.center_on(f.feet(&iso));
+                camera.center_on(shown_at(f));
             }
         }
         play.update(&res, dt);
@@ -496,7 +507,7 @@ async fn main() {
         });
         for (_, u) in &upright {
             match u {
-                Upright::Mover(m) => draw_mover(&res, &camera, &iso, m),
+                Upright::Mover(m) => draw_mover(&res, &camera, &iso, &relief, m),
                 Upright::Strip(o, s) => o.draw_strip(&camera, &iso, s, time),
             }
         }
@@ -504,21 +515,21 @@ async fn main() {
             for o in &objects {
                 for (p, blocked) in o.kind.cells(o.at) {
                     let color = if blocked { Color::new(1.0, 0.2, 0.2, 0.9) } else { Color::new(0.2, 1.0, 0.2, 0.9) };
-                    draw_diamond(&camera, &iso, p, color);
+                    draw_diamond(&camera, &iso, &relief, p, color);
                 }
             }
         }
 
         // the selected army, and what a click on the tile under the mouse would do
         if let Some(f) = play.selected_figure() {
-            draw_diamond(&camera, &iso, f.next_tile(), Color::new(1.0, 0.85, 0.2, 0.8));
+            draw_diamond(&camera, &iso, &relief, f.next_tile(), Color::new(1.0, 0.85, 0.2, 0.8));
         }
         let color = match play.hover(hover) {
             Hover::Walk => Color::new(1.0, 1.0, 1.0, 0.6),
             Hover::Attack => Color::new(1.0, 0.6, 0.1, 0.9),
             Hover::Blocked => Color::new(1.0, 0.3, 0.3, 0.6),
         };
-        draw_diamond(&camera, &iso, hover, color);
+        draw_diamond(&camera, &iso, &relief, hover, color);
 
         // a dark band under the text, so it reads over trees and snow
         draw_rectangle(0.0, 0.0, screen_width(), 78.0, Color::new(0.0, 0.0, 0.0, 0.55));
