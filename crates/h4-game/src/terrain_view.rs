@@ -23,7 +23,7 @@ use h4_formats::terrain::{Metatile, METATILE_SIZE, TILE_HEIGHT, TILE_WIDTH};
 use h4_formats::transition::{corner_code, Mask, Neighbours, Transitions};
 use macroquad::prelude::*;
 
-use crate::world::{Pos, Road, Terrain, World};
+use crate::world::{Pos, Road, Terrain, Tile, World};
 
 const STEP: i32 = 5;
 const CHUNK: i32 = 1024;
@@ -227,9 +227,14 @@ fn rank(t: FullType) -> (u8, u8) {
 
 /// Which neighbours of `p` have full terrain type `t`.
 fn neighbours_with(world: &World, p: Pos, t: FullType) -> Neighbours {
+    neighbours(world, p, |tile| (tile.terrain, tile.set) == t)
+}
+
+/// Which neighbours of `p` are on the map and pass `test`.
+fn neighbours(world: &World, p: Pos, test: impl Fn(&Tile) -> bool) -> Neighbours {
     let has = |dc: i32, dr: i32| {
         let q = Pos { col: p.col + dc, row: p.row + dr };
-        world.contains(q) && full_type(world, q) == t
+        world.contains(q) && test(world.tile(q))
     };
     // map column grows to the screen's lower right, row to the lower left
     Neighbours {
@@ -242,6 +247,57 @@ fn neighbours_with(world: &World, p: Pos, t: FullType) -> Neighbours {
         w: has(-1, 1),
         nw: has(-1, 0),
     }
+}
+
+/// Corner digits of a code, east first: e, s, w, n (see `corner_code`).
+const CORNER_PLACES: [i32; 4] = [1000, 100, 10, 1];
+
+/// What the map editor keeps of the code of a road tile's neighbours without road. Found in
+/// the transitions stored in the installed maps: the code is kept, except that of two
+/// neighbouring corners with digit 3 one is dropped, which one at random (3333 becomes 3030 or
+/// 0303, 3123 becomes 3120 or 0123). `hash` stands in for the editor's random pick.
+fn road_cut_code(code: i32, hash: u32) -> i32 {
+    let mut digits = CORNER_PLACES.map(|place| code / place % 10);
+    let start = (hash % 4) as usize;
+    for k in 0..4 {
+        let i = (start + k) % 4;
+        let next = (i + 1) % 4;
+        if digits[i] == 3 && digits[next] == 3 {
+            digits[next] = 0;
+        }
+    }
+    digits.iter().zip(CORNER_PLACES).map(|(d, place)| d * place).sum()
+}
+
+/// What the map editor keeps of the code of a road around a tile without road: only the
+/// corners where the road runs along both edges (digit 3, the inside of a turn). A road
+/// passing by one edge (1, 2) or touching a corner (4) stores nothing (seen in all maps:
+/// 3102 is stored as 3000, 21 as no transition at all).
+fn road_edge_code(code: i32) -> i32 {
+    CORNER_PLACES.iter().map(|&place| if code / place % 10 == 3 { 3 * place } else { 0 }).sum()
+}
+
+/// The masks that together make up corner code `code` in `set`: the mask of the whole
+/// code if the set has one, else one mask per corner (the map editor splits codes the same
+/// way: a tile can store several masks of one border).
+fn masks_for<'t>(transitions: &'t Transitions, set: &str, code: i32) -> Vec<&'t Mask> {
+    if code == 0 {
+        return Vec::new();
+    }
+    if let Some(m) = transitions.mask(set, code) {
+        return vec![m];
+    }
+    CORNER_PLACES
+        .iter()
+        .map(|place| code / place % 10 * place)
+        .filter(|&c| c != 0)
+        .filter_map(|c| transitions.mask(set, c))
+        .collect()
+}
+
+/// How much of pixel (x, y) the masks cover together: the strongest one counts.
+fn coverage(masks: &[&Mask], x: usize, y: usize) -> u8 {
+    masks.iter().map(|m| m.alpha(x, y)).max().unwrap_or(0)
 }
 
 /// A stable pseudo-random number for a tile, so the same map always looks the same.
@@ -301,9 +357,28 @@ impl TerrainView {
                     blend(&mut canvas, width, x, y, &texture, |mx, my| mask.alpha(mx, my));
                 }
 
-                if let Some(road) = here.road {
-                    let texture = metatiles.tile(p, Kind::Generated, |alt| road_name(road, alt))?;
-                    blend(&mut canvas, width, x, y, &texture, |_, _| 255);
+                // Roads as the map editor lays them (see `road_cut_code`, `road_edge_code`): a
+                // road tile loses its edges towards tiles without road, and a tile without road
+                // gets the inner corners of a road turning around it.
+                let road_set = format!("road {}", 1 + tile_hash(p) % 2);
+                match here.road {
+                    Some(road) => {
+                        let bare = road_cut_code(corner_code(neighbours(world, p, |t| t.road.is_none())), tile_hash(p));
+                        let cut = masks_for(&transitions, &road_set, bare);
+                        let texture = metatiles.tile(p, Kind::Generated, |alt| road_name(road, alt))?;
+                        blend(&mut canvas, width, x, y, &texture, |mx, my| 255 - coverage(&cut, mx, my));
+                    }
+                    None => {
+                        for road in [Road::Gravel, Road::Dirt, Road::Cobblestone] {
+                            let code = road_edge_code(corner_code(neighbours(world, p, |t| t.road == Some(road))));
+                            if code == 0 {
+                                continue;
+                            }
+                            let edge = masks_for(&transitions, &road_set, code);
+                            let texture = metatiles.tile(p, Kind::Generated, |alt| road_name(road, alt))?;
+                            blend(&mut canvas, width, x, y, &texture, |mx, my| coverage(&edge, mx, my));
+                        }
+                    }
                 }
             }
         }

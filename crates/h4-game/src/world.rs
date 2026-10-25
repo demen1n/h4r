@@ -230,10 +230,16 @@ impl World {
         ];
         for leg in route.windows(2) {
             let ((from, road), (to, _)) = (leg[0], leg[1]);
-            if let Some(path) = w.find_path_with(from, to, &NEIGHBOURS[..4]) {
-                for p in std::iter::once(from).chain(path) {
-                    w.tile_mut(p).road = Some(road);
-                }
+            // Two straight runs look like a road; a search makes long one-tile stairs on
+            // slanted legs, which show as a zigzag. The search is kept for legs where both
+            // L shapes would cross water.
+            let path = [Pos { col: to.col, row: from.row }, Pos { col: from.col, row: to.row }]
+                .into_iter()
+                .map(|corner| straight(from, corner).into_iter().chain(straight(corner, to)).collect::<Vec<Pos>>())
+                .find(|path| path.iter().all(|&p| w.passable(p)))
+                .or_else(|| w.find_path_with(from, to, &NEIGHBOURS[..4]));
+            for p in std::iter::once(from).chain(path.into_iter().flatten()) {
+                w.tile_mut(p).road = Some(road);
             }
         }
         w
@@ -282,6 +288,13 @@ impl World {
 
 /// Straight steps first, then diagonals.
 const NEIGHBOURS: [(i32, i32); 8] = [(1, 0), (0, 1), (-1, 0), (0, -1), (1, 1), (-1, 1), (1, -1), (-1, -1)];
+
+/// The tiles from `from` (not included) to `to` along a row or a column.
+fn straight(from: Pos, to: Pos) -> Vec<Pos> {
+    let steps = (to.col - from.col).abs().max((to.row - from.row).abs());
+    let (dc, dr) = ((to.col - from.col).signum(), (to.row - from.row).signum());
+    (1..=steps).map(|i| Pos { col: from.col + dc * i, row: from.row + dr * i }).collect()
+}
 
 /// Inside a wobbly ellipse centred at (cx, cy) with radii (rx, ry)?
 fn blob(x: f32, y: f32, cx: f32, cy: f32, rx: f32, ry: f32) -> bool {
