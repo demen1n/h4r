@@ -8,7 +8,9 @@
 //!    (vtable slot 29). Random towns, dwellings, shrines and temples choose their kind here.
 //!    An object tied to a town that is itself random answers "not yet" and is put aside.
 //! 2. The put-aside objects are asked again with pass 1, 2, ... until none is left; by then
-//!    every town has its type.
+//!    every town has its type. Armies with heroes always wait for pass 1: that is when a
+//!    hero the map leaves random gets its class and gender (`t_hero::preplacement`, rva
+//!    `330e90`, calls `derandomize`, rva `3311f0`).
 //! 3. "Placement": every object, in file order, gets `place(map, point)` (slot 28). A random
 //!    object creates the real one on its spot here: a pile of a random resource, a monster
 //!    army, an artifact.
@@ -21,9 +23,11 @@
 //! sequence is not bit-exact with the exe.
 
 use h4_formats::map::{MapFile, MapHeader};
+use h4_formats::map_army::{Army, Stack};
 use h4_formats::map_body::{ObjectKind, Placed, RandomLink};
 
 use crate::creatures::{self, CreatureStats, TOWN_TYPES};
+use crate::heroes::BASE_CLASSES;
 use crate::random::GlobalRandom;
 
 /// What a random object turned into.
@@ -44,6 +48,9 @@ pub enum Placement {
     Shrine { school: usize, level: u32, model: String },
     /// A temple of an alignment (life, order, death, chaos, nature).
     Temple { alignment: usize, model: String },
+    /// The heroes of an army, in stack order, as (base class, male) once random classes
+    /// and genders are chosen.
+    Heroes(Vec<(usize, bool)>),
 }
 
 impl Placement {
@@ -56,7 +63,7 @@ impl Placement {
             | Placement::WeeklyGenerator { model, .. }
             | Placement::Shrine { model, .. }
             | Placement::Temple { model, .. } => Some(model),
-            Placement::Monster { .. } => None,
+            Placement::Monster { .. } | Placement::Heroes(_) => None,
         }
     }
 }
@@ -159,7 +166,7 @@ enum Link {
 ///
 /// Not handled yet (their rolls are skipped, which shifts the numbers after them):
 /// the spell of a random shrine, random artifacts (one roll each is taken so the count of
-/// rolls stays right), random teachers and conservatories, random heroes and stacks with
+/// rolls stays right), random teachers and conservatories, heroes in prisons, stacks with
 /// a random count in armies, and whatever the real objects created here roll in their own
 /// placement (towns, for example).
 pub fn place_random_objects(
@@ -191,17 +198,22 @@ pub fn place_random_objects(
     // 1. pre-placement, pass 0, and 2. the put-aside objects until none is left
     let mut later = Vec::new();
     for (i, o) in body.objects.iter().enumerate() {
-        if let ObjectKind::Placed(p) = &o.kind {
-            if state.preplace(i, p, 0, rng) {
-                later.push(i);
-            }
+        let wait = match &o.kind {
+            ObjectKind::Placed(p) => state.preplace(i, p, 0, rng),
+            ObjectKind::Army { army, .. } => army.stacks.iter().any(|s| matches!(s, Stack::Hero(_))),
+        };
+        if wait {
+            later.push(i);
         }
     }
     let mut pass = 1;
     while !later.is_empty() {
         later.retain(|&i| match &body.objects[i].kind {
             ObjectKind::Placed(p) => state.preplace(i, p, pass, rng),
-            ObjectKind::Army { .. } => false,
+            ObjectKind::Army { owner, army, .. } => {
+                state.derandomize_heroes(i, *owner, army, rng);
+                false
+            }
         });
         pass += 1;
         // Every link is a town name, and every town has a type after pass 0, so pass 1
@@ -292,6 +304,50 @@ impl State<'_> {
                 false
             }
             _ => false,
+        }
+    }
+
+    /// The heroes of an army get a class and gender if the map leaves them random
+    /// (`t_hero::derandomize`, rva `3311f0`). Only heroes without a portrait (-1) are
+    /// touched: a random class is a random base class of the owner's alignment (any of the
+    /// eleven without an owner), a random gender a coin flip. Then the game picks one of
+    /// its standard heroes of that class and gender for name and portrait, one more roll.
+    fn derandomize_heroes(&mut self, i: usize, owner: u8, army: &Army, rng: &mut GlobalRandom) {
+        let mut out = Vec::new();
+        for s in &army.stacks {
+            let Stack::Hero(h) = s else { continue };
+            let mut class = usize::try_from(h.class).ok();
+            let mut male = match h.gender {
+                0 => Some(false),
+                1 => Some(true),
+                _ => None,
+            };
+            if h.portrait < 0 {
+                if class.is_none() {
+                    // The owner's alignment. If we don't know it (see `Setup`) we take the
+                    // no-owner way, which the game uses only for unowned heroes.
+                    let alignment = self.setup.player_town_types.get(owner as usize).copied().flatten();
+                    class = Some(match alignment {
+                        Some(a) => {
+                            let fitting: Vec<usize> =
+                                (0..BASE_CLASSES.len()).filter(|&c| BASE_CLASSES[c].alignment == a).collect();
+                            fitting[rng.next() as usize % fitting.len()]
+                        }
+                        None => rng.next() as usize % BASE_CLASSES.len(),
+                    });
+                }
+                if male.is_none() {
+                    male = Some(rng.next() % 2 == 1);
+                }
+                // the standard hero for name and portrait
+                rng.next();
+            }
+            if let (Some(c), Some(m)) = (class, male) {
+                out.push((c, m));
+            }
+        }
+        if !out.is_empty() {
+            self.result[i] = Some(Placement::Heroes(out));
         }
     }
 

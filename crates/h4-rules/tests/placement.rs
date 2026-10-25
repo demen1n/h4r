@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use h4_formats::archive::{data_dir, Resources};
 use h4_formats::map::MapFile;
+use h4_formats::map_army::Stack;
 use h4_formats::map_body::ObjectKind;
 use h4_formats::table::Table;
 use h4_rules::creatures;
@@ -44,6 +45,7 @@ fn random_objects_of_all_maps() {
     assert!(!files.is_empty());
     let mut failures = Vec::new();
     let mut monsters = 0;
+    let mut heroes = 0;
     for path in &files {
         let name = path.file_name().unwrap().to_string_lossy().to_string();
         let map = MapFile::read(&std::fs::read(path).unwrap(), &name).expect("map");
@@ -53,6 +55,22 @@ fn random_objects_of_all_maps() {
         assert_eq!(placed.len(), body.objects.len());
 
         for (o, result) in body.objects.iter().zip(&placed) {
+            if let ObjectKind::Army { army, .. } = &o.kind {
+                let random = army.stacks.iter().filter(|s| matches!(s, Stack::Hero(h) if h.portrait < 0)).count();
+                match result {
+                    Some(Placement::Heroes(list)) => {
+                        heroes += list.len();
+                        for &(class, male) in list {
+                            let model = h4_rules::heroes::adv_model_name(class as i8, male as i8).expect("base class");
+                            if res.entry(&format!("adv_actor.{model}.h4d")).is_none() {
+                                failures.push(format!("{name}: no hero model {model}"));
+                            }
+                        }
+                    }
+                    _ if random > 0 => failures.push(format!("{name}: army at ({}, {}): random hero not chosen", o.x, o.y)),
+                    _ => {}
+                }
+            }
             let ObjectKind::Placed(p) = &o.kind else { continue };
             if !HANDLED.contains(&p.type_name.as_str()) {
                 continue;
@@ -88,6 +106,7 @@ fn random_objects_of_all_maps() {
         }
     }
     assert!(monsters > 5000, "only {monsters} monsters placed");
+    assert!(heroes > 300, "only {heroes} heroes with a look");
     if !failures.is_empty() {
         failures.truncate(40);
         panic!("{} problems:\n  {}", failures.len(), failures.join("\n  "));

@@ -59,9 +59,17 @@ pub fn map_armies(
             _ => continue,
         };
         let actor = if let Some(h) = leader {
-            // A hero the map leaves random (class or gender -1) gets them when the game
-            // starts (`t_hero::derandomize`, not traced yet); until then the default model.
-            Some(heroes::adv_model_name(h.class, h.gender).unwrap_or_else(|| hero.to_string()))
+            // A hero the map leaves random got a class and gender in `placement`; one with
+            // a portrait but no class keeps the default model for now.
+            let chosen = match placements.get(i) {
+                Some(Some(Placement::Heroes(list))) => list.first().copied(),
+                _ => None,
+            };
+            let name = match chosen {
+                Some((class, male)) => heroes::adv_model_name(class as i8, male as i8),
+                None => heroes::adv_model_name(h.class, h.gender),
+            };
+            Some(name.unwrap_or_else(|| hero.to_string()))
         } else {
             creature.and_then(|c| actors.get(&normalize(c)).cloned())
         };
