@@ -50,3 +50,28 @@ fn creature_table() {
     assert_eq!((by_id[47].keyword.as_str(), by_id[47].experience), ("peasant", 4));
     assert_eq!(creatures::TOWN_TYPES[by_id[46].alignment], "asylum", "orcs are chaos");
 }
+
+/// Every artifact of the enum has a table row, every model exists in the archives, and
+/// every artifact allowed by default and not disabled has one. (Two without a model,
+/// `bow_of_the_white_stag` and `nomad_blackbow`, are not allowed by default, and every
+/// installed map that lists its artifacts turns them off.)
+#[test]
+fn artifact_table_and_models() {
+    let Some(res) = resources() else { return };
+    let data = res.read("table.artifacts.h4d").expect("read table.Artifacts");
+    let table = Table::read(&data, "table.Artifacts").expect("parse table.Artifacts");
+    let info = h4_rules::artifacts::from_table(&table).expect("artifacts");
+    assert_eq!(info.len(), 248);
+    let potions = info.iter().filter(|a| a.slot == h4_rules::artifacts::POTION_SLOT).count();
+    assert!(potions > 10, "{potions} potions");
+    for (id, a) in info.iter().enumerate() {
+        match h4_rules::artifacts::model(id) {
+            Some(model) => assert!(res.entry(&format!("adv_object.{model}.h4d")).is_some(), "no adv_object.{model}"),
+            None => assert!(
+                h4_rules::artifacts::DISABLED.contains(&id) || !a.allowed_by_default,
+                "{} has no model",
+                h4_rules::artifacts::KEYWORDS[id]
+            ),
+        }
+    }
+}

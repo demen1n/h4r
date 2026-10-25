@@ -26,6 +26,7 @@ use h4_formats::map::{MapFile, MapHeader};
 use h4_formats::map_army::{Army, Stack};
 use h4_formats::map_body::{ObjectKind, Placed, RandomLink};
 
+use crate::artifacts::{self, ArtifactInfo, ArtifactPool};
 use crate::creatures::{self, CreatureStats, TOWN_TYPES};
 use crate::heroes::BASE_CLASSES;
 use crate::random::GlobalRandom;
@@ -48,6 +49,8 @@ pub enum Placement {
     Shrine { school: usize, level: u32, model: String },
     /// A temple of an alignment (life, order, death, chaos, nature).
     Temple { alignment: usize, model: String },
+    /// An artifact (id, see [`crate::artifacts::KEYWORDS`]) lying on the map.
+    Artifact { artifact: usize, model: String },
     /// The heroes of an army, in stack order, as (base class, male) once random classes
     /// and genders are chosen.
     Heroes(Vec<(usize, bool)>),
@@ -62,7 +65,8 @@ impl Placement {
             | Placement::MaterialPile { model, .. }
             | Placement::WeeklyGenerator { model, .. }
             | Placement::Shrine { model, .. }
-            | Placement::Temple { model, .. } => Some(model),
+            | Placement::Temple { model, .. }
+            | Placement::Artifact { model, .. } => Some(model),
             Placement::Monster { .. } | Placement::Heroes(_) => None,
         }
     }
@@ -165,13 +169,13 @@ enum Link {
 /// the map body, `None` for objects that aren't random or that we don't handle yet.
 ///
 /// Not handled yet (their rolls are skipped, which shifts the numbers after them):
-/// the spell of a random shrine, random artifacts (one roll each is taken so the count of
-/// rolls stays right), random teachers and conservatories, heroes in prisons, stacks with
+/// the spell of a random shrine, random teachers and conservatories, heroes in prisons, stacks with
 /// a random count in armies, and whatever the real objects created here roll in their own
 /// placement (towns, for example).
 pub fn place_random_objects(
     map: &MapFile,
     creatures: &[CreatureStats],
+    artifacts: &[ArtifactInfo],
     setup: &Setup,
     rng: &mut GlobalRandom,
 ) -> Vec<Option<Placement>> {
@@ -179,6 +183,7 @@ pub fn place_random_objects(
     let mut state = State {
         map,
         creatures,
+        artifacts: ArtifactPool::new(artifacts, body.allowed_artifacts.as_deref(), map.header.expansion),
         setup,
         result: vec![None; body.objects.len()],
         town_types: Vec::new(),
@@ -235,6 +240,7 @@ pub fn place_random_objects(
 struct State<'a> {
     map: &'a MapFile,
     creatures: &'a [CreatureStats],
+    artifacts: ArtifactPool<'a>,
     setup: &'a Setup,
     result: Vec<Option<Placement>>,
     /// Town name → town type, for objects tied to a town. Random towns are added as they
@@ -448,10 +454,26 @@ impl State<'_> {
                     self.result[i] = Some(Placement::Monster { stacks });
                 }
             }
-            // Each artifact choice takes exactly one roll (rva `4d9920`, `4d9c40`, `4d9f20`);
-            // take it so the rolls after stay in step, until artifacts are handled.
+            // rva `430cf0` (by level, the major type), `4314a0` (potion), `430f80` (tome),
+            // `431210` (staff)
             "random_artifact" | "random_potion" | "random_staff" | "random_tome" => {
-                rng.next();
+                let picked = match p.type_name.as_str() {
+                    "random_potion" => self.artifacts.pick_potion(rng),
+                    "random_tome" => self.artifacts.pick_from(&[200, 202, 199, 198, 201], rng),
+                    "random_staff" => self.artifacts.pick_from(&[29, 182, 181, 185, 184], rng),
+                    _ => match artifacts::LEVELS.iter().position(|l| *l == p.major) {
+                        Some(level) => self.artifacts.pick_level(level, rng),
+                        None => None,
+                    },
+                };
+                if let Some(artifact) = picked {
+                    match artifacts::model(artifact) {
+                        Some(model) => {
+                            self.result[i] = Some(Placement::Artifact { artifact, model: model.to_string() })
+                        }
+                        None => eprintln!("artifact {} has no map model", artifacts::KEYWORDS[artifact]),
+                    }
+                }
             }
             _ => {}
         }

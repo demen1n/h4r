@@ -21,7 +21,9 @@ fn main() {
     let by_id = creatures::in_enum_order(&creatures::from_table(&table).expect("stats")).expect("order");
     let map = MapFile::read(&std::fs::read(&path).expect("read map"), &path).expect("map");
     let setup = Setup::from_header(&map.header, difficulty);
-    let placed = place_random_objects(&map, &by_id, &setup, &mut GlobalRandom::new(seed));
+    let art_table = Table::read(&res.read("table.artifacts.h4d").expect("read"), "table.Artifacts").expect("parse");
+    let arts = h4_rules::artifacts::from_table(&art_table).expect("artifacts");
+    let placed = place_random_objects(&map, &by_id, &arts, &setup, &mut GlobalRandom::new(seed));
 
     let body = map.body.as_ref().expect("objects");
     for (o, result) in body.objects.iter().zip(&placed) {
@@ -41,6 +43,7 @@ fn main() {
             Placement::WeeklyGenerator { material, amount, model } => format!("{amount} {} a week ({model})", MATERIALS[*material]),
             Placement::Shrine { model, .. } => model.clone(),
             Placement::Temple { model, .. } => model.clone(),
+            Placement::Artifact { artifact, model } => format!("{} ({model})", h4_rules::artifacts::KEYWORDS[*artifact]),
             Placement::Heroes(h) => {
                 let s: Vec<String> = h.iter().map(|&(c, m)| h4_rules::heroes::adv_model_name(c as i8, m as i8).unwrap_or_default()).collect();
                 s.join(", ")

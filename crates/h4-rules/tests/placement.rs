@@ -26,6 +26,7 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
 const HANDLED: &[&str] = &[
     "random_town", "random_monster", "random_random_monster", "random_creature_dwelling",
     "random_material_pile", "random_weekly_material_generator", "random_shrine", "random_temple",
+    "random_artifact", "random_potion", "random_staff", "random_tome",
 ];
 
 #[test]
@@ -39,6 +40,8 @@ fn random_objects_of_all_maps() {
     let table = Table::read(&res.read("table.creatures.h4d").expect("read"), "table.creatures").expect("parse");
     let all = creatures::from_table(&table).expect("stats");
     let by_id = creatures::in_enum_order(&all).expect("enum order");
+    let art_table = Table::read(&res.read("table.artifacts.h4d").expect("read"), "table.Artifacts").expect("parse");
+    let arts = h4_rules::artifacts::from_table(&art_table).expect("artifacts");
 
     let mut files = Vec::new();
     collect(&dir.parent().expect("parent").join("maps"), &mut files);
@@ -51,7 +54,7 @@ fn random_objects_of_all_maps() {
         let map = MapFile::read(&std::fs::read(path).unwrap(), &name).expect("map");
         let body = map.body.as_ref().expect("objects");
         let setup = Setup::from_header(&map.header, 1);
-        let placed = place_random_objects(&map, &by_id, &setup, &mut GlobalRandom::new(12345));
+        let placed = place_random_objects(&map, &by_id, &arts, &setup, &mut GlobalRandom::new(12345));
         assert_eq!(placed.len(), body.objects.len());
 
         for (o, result) in body.objects.iter().zip(&placed) {

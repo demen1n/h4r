@@ -17,6 +17,7 @@ use std::rc::Rc;
 
 use h4_formats::archive::{data_dir, Resources};
 use h4_formats::table::Table;
+use h4_rules::artifacts::{self, ArtifactInfo};
 use h4_rules::creatures::{self, CreatureStats};
 use h4_rules::placement::{place_random_objects, Placement, Setup};
 use h4_rules::random::GlobalRandom;
@@ -125,18 +126,22 @@ fn map_objects(
     placed
 }
 
-/// Creature stats in game enum order, for random monsters and dwellings.
-fn creature_stats(res: &Resources) -> Result<Vec<CreatureStats>, String> {
-    let data = res.read("table.creatures.h4d").map_err(|e| e.to_string())?;
-    let table = Table::read(&data, "table.creatures").map_err(|e| e.to_string())?;
-    creatures::in_enum_order(&creatures::from_table(&table)?)
+/// Creature stats and artifact data in game enum order, for random objects.
+fn game_tables(res: &Resources) -> Result<(Vec<CreatureStats>, Vec<ArtifactInfo>), String> {
+    let table = |name: &str| -> Result<Table, String> {
+        let data = res.read(&format!("table.{name}.h4d")).map_err(|e| e.to_string())?;
+        Table::read(&data, name).map_err(|e| e.to_string())
+    };
+    let creatures = creatures::in_enum_order(&creatures::from_table(&table("creatures")?)?)?;
+    let artifacts = artifacts::from_table(&table("Artifacts")?)?;
+    Ok((creatures, artifacts))
 }
 
 /// Decide what the map's random objects become, as the game does at the start. The seed is
 /// fixed (or `H4_SEED`), so the same map looks the same every time; the game uses the clock.
 fn random_placements(res: &Resources, map: &h4_formats::map::MapFile) -> Vec<Option<Placement>> {
-    let stats = match creature_stats(res) {
-        Ok(s) => s,
+    let (stats, arts) = match game_tables(res) {
+        Ok(t) => t,
         Err(e) => {
             eprintln!("random objects stay random: {e}");
             return Vec::new();
@@ -145,7 +150,7 @@ fn random_placements(res: &Resources, map: &h4_formats::map::MapFile) -> Vec<Opt
     let seed = std::env::var("H4_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(1);
     // normal difficulty
     let setup = Setup::from_header(&map.header, 1);
-    place_random_objects(map, &stats, &setup, &mut GlobalRandom::new(seed))
+    place_random_objects(map, &stats, &arts, &setup, &mut GlobalRandom::new(seed))
 }
 
 /// Buildings placed by hand near the hero's start, then forests and mountains scattered

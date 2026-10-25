@@ -49,11 +49,13 @@ impl Table {
         &self.rows[HEADER_ROWS.min(self.rows.len())..]
     }
 
-    /// Index of the column whose second header row says `title` (e.g. "Hit Points").
-    /// The second row holds the column names; the first only groups some of them
-    /// ("Dmg" over Low/High, "Cost" over the resources).
+    /// Index of the column named `title` (e.g. "Hit Points"). Tables with grouped columns
+    /// (`creatures`: "Dmg" over Low/High) have the names in the second header row; tables
+    /// without groups (`Artifacts`) have them in the first and leave the second empty.
     pub fn column(&self, title: &str) -> Option<usize> {
-        self.rows.get(1)?.iter().position(|c| c.trim() == title)
+        let second_empty = self.rows.get(1).is_none_or(|r| r.iter().all(|c| c.trim().is_empty()));
+        let names = self.rows.get(if second_empty { 0 } else { 1 })?;
+        names.iter().position(|c| c.trim() == title)
     }
 }
 
@@ -81,6 +83,11 @@ mod tests {
         assert_eq!(t.data_rows(), &[vec!["orc".to_string(), "1".into(), "3".into()]]);
         assert_eq!(t.column("High"), Some(2));
         assert_eq!(t.column("Dmg"), None); // only the second header row names columns
+
+        // without groups the names are in the first row and the second is empty
+        let data = encode(&[&["Keyword", "Level"], &["", ""], &["axe", "Item"]]);
+        let t = Table::read(&data, "test").unwrap();
+        assert_eq!(t.column("Level"), Some(1));
     }
 
     #[test]

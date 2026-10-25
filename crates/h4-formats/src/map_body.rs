@@ -32,6 +32,9 @@ use crate::Result;
 #[derive(Debug, Clone)]
 pub struct MapBody {
     pub events: GlobalEvents,
+    /// Artifacts the map allows, indexed by artifact id; `None` if the map keeps the
+    /// game's defaults.
+    pub allowed_artifacts: Option<Vec<bool>>,
     pub objects: Vec<MapObject>,
 }
 
@@ -98,10 +101,10 @@ pub(crate) fn read_body(r: &mut Reader, version: u16, players: &[u8]) -> Result<
         read_obelisk(r)?;
     }
     read_player_data(r, version, players)?;
-    read_allowed(r, version)?;
+    let allowed_artifacts = read_allowed(r, version)?;
     read_ai_importance(r, version)?;
     let objects = read_objects(r)?;
-    Ok(MapBody { events, objects })
+    Ok(MapBody { events, allowed_artifacts, objects })
 }
 
 /// One obelisk color (rva `7c65f0`): version 0, a flag, u16, and (if the flag is set) a
@@ -155,19 +158,21 @@ fn read_player_data(r: &mut Reader, version: u16, players: &[u8]) -> Result<()> 
 }
 
 /// `t_artifact_set::read_impl` (rva `1516f0`): version 0, u16 bit count, the bits.
-fn read_artifact_set(r: &mut Reader) -> Result<()> {
+/// `t_artifact_set`: version 0, u16 bit count, the bits (bit i = byte i / 8, low bit first).
+fn read_artifact_set(r: &mut Reader) -> Result<Vec<bool>> {
     zero_version(r, "artifact set")?;
     let bits = r.u16()? as usize;
-    r.take(bits.div_ceil(8))?;
-    Ok(())
+    let bytes = r.take(bits.div_ceil(8))?;
+    Ok((0..bits).map(|i| bytes[i / 8] >> (i % 8) & 1 != 0).collect())
 }
 
 /// Allowed artifacts, an unknown bool array, allowed skills and spells, two artifact sets.
-fn read_allowed(r: &mut Reader, version: u16) -> Result<()> {
+fn read_allowed(r: &mut Reader, version: u16) -> Result<Option<Vec<bool>>> {
+    let mut allowed_artifacts = None;
     if version > 17 {
         // allowed artifacts (rva d0a40)
         if r.u8()? != 0 {
-            read_artifact_set(r)?;
+            allowed_artifacts = Some(read_artifact_set(r)?);
         }
         // rva d0c10: a t_bool_array (u16 count, one byte each); seen once, 312 entries
         if r.u8()? != 0 {
@@ -192,7 +197,7 @@ fn read_allowed(r: &mut Reader, version: u16) -> Result<()> {
         read_artifact_set(r)?;
         read_artifact_set(r)?;
     }
-    Ok(())
+    Ok(allowed_artifacts)
 }
 
 /// Since version 23: AI importance of artifacts, then twice of spells. Each is version 0,
