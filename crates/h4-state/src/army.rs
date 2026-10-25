@@ -92,6 +92,9 @@ pub struct MapArmy {
     /// movement is worked out from all of them (`h4_rules::movement`). Filled in by the
     /// rules at the start of each day; 0 for empty slots.
     pub movement_left: [f32; SLOTS],
+    /// Daily growth of a neutral stack not yet worth a whole creature, in 1/256 of one
+    /// (the game's `+0xa4` of the stack), per slot.
+    pub growth_remainder: [i32; SLOTS],
 }
 
 #[cfg(test)]

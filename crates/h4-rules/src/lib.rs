@@ -13,6 +13,7 @@
 //! - [`placement`]: what the random objects of a map become when a game starts.
 //! - [`new_game`]: the [`h4_state::GameState`] of a map on day 1.
 //! - [`movement`]: armies walking on the map: step costs, movement points, paths.
+//! - [`turns`]: ending a turn and what a new day brings.
 
 pub mod artifacts;
 pub mod battle;
@@ -23,3 +24,4 @@ pub mod movement;
 pub mod new_game;
 pub mod placement;
 pub mod random;
+pub mod turns;

@@ -1,0 +1,20 @@
+# Новый день
+
+Адреса — наш exe (rva). Функции передачи хода (`t_adventure_map::get_next_player`, `set_next_player`, `process_day_end`, `process_new_day`) в нашем exe ещё не найдены: в мапе переноса их нет, а по соседям из отладочного мапа (`store_map_score` rva `f2950`) рядом лежат только шаблоны STL.
+
+## Армии
+
+`t_creature_array::process_new_day(bool)` — rva `23fd50`: для каждого непустого слота вызывает его `process_new_day(player, flag, army, …)` (слот `+0xcc` vtable). Армия на карте (`t_army`, rva `1210d0`) вызывает её с флагом 1.
+
+`t_creature_stack::process_new_day` — rva `250ca0`: временные бонусы стека (вектор по 0x18 байт, `+0x64..+0x68`) теряют день, истёкшие снимаются (их величина вычитается из стата по индексу); затем запас движения `+0x70` = `min(m·11/25 + 1200, 3000) + бонус (+0x24)` — то же, что `get_raw_adventure_movement`.
+
+`t_creature::process_new_day` — rva `23de10`: сначала базовая часть (выше); у существа 0x2f (по enum — leprechaun?) — доход владельцу (`7e40c0`); затем, если у армии нет игрока-владельца и флаг стоит, — **рост нейтрального стека**:
+
+```
+weekly = min(count * 256 / 10, traits.weekly_growth (+0x70) * 256)
+today  = weekly / 7 + remainder (+0xa4)
+count += today >> 8
+remainder = today & 0xff
+```
+
+То есть десятая часть стека в неделю, но не больше недельного прироста существа, поровну на 7 дней, доли — в 1/256.

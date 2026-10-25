@@ -409,6 +409,7 @@ mod tests {
             speed: 5,
             movement,
             shots: 0,
+            weekly_growth: 10,
             alignment,
             experience: 5,
         }

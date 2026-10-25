@@ -19,6 +19,9 @@ pub struct CreatureStats {
     pub speed: i32,
     pub movement: i32,
     pub shots: i32,
+    /// Creatures a dwelling makes in a week (`Weekly Growth`, `+0x70` of the traits);
+    /// neutral monsters on the map grow by it too.
+    pub weekly_growth: i32,
     /// Town type the creature belongs to (see [`TOWN_TYPES`]); the table calls it
     /// alignment. In the exe it is at `+0x44` of the creature traits (rva `255390`).
     pub alignment: usize,
@@ -98,6 +101,7 @@ pub fn from_table(table: &Table) -> Result<Vec<CreatureStats>, String> {
     let shots = col("Shots")?;
     let alignment = col("Alignment")?;
     let experience = col("Experience")?;
+    let weekly_growth = col("Weekly Growth")?;
 
     let mut out = Vec::new();
     for (i, row) in table.data_rows().iter().enumerate() {
@@ -132,6 +136,7 @@ pub fn from_table(table: &Table) -> Result<Vec<CreatureStats>, String> {
             speed: number(speed)?,
             movement: number(movement)?,
             shots: number(shots)?,
+            weekly_growth: number(weekly_growth)?,
             alignment: align,
             experience: number(experience)?,
         });

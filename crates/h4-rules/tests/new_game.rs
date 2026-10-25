@@ -13,7 +13,7 @@ use h4_rules::movement;
 use h4_rules::new_game::{self, Footprint};
 use h4_rules::placement::{place_random_objects, Setup};
 use h4_rules::random::GlobalRandom;
-use h4_rules::{artifacts, creatures};
+use h4_rules::{artifacts, creatures, turns};
 
 fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in std::fs::read_dir(dir).expect("read maps dir").flatten() {
@@ -47,6 +47,7 @@ fn states_of_all_maps() {
     let (mut armies, mut blocked_tiles) = (0, 0);
     let mut on_objects = Vec::new();
     let (mut paths, mut unreachable_monsters) = (0, 0);
+    let (mut grown, mut neutrals) = (0_i64, 0_i64);
     for path in &files {
         let name = path.file_name().unwrap().to_string_lossy().to_string();
         let map = MapFile::read(&std::fs::read(path).unwrap(), &name).unwrap();
@@ -97,9 +98,7 @@ fn states_of_all_maps() {
         // a way to the nearest monster on its level if there is one; each step of the way
         // touches the one before and can be entered.
         let mut state = state;
-        for i in 0..state.armies.len() {
-            movement::refresh_movement(&mut state.armies[i], &stats);
-        }
+        turns::begin_game(&mut state, &stats);
         for a in state.armies.iter().filter(|a| a.owner.is_some()) {
             let full = movement::max_movement(&a.army, &stats);
             if !(1200..=3000).contains(&full) || movement::movement_left(a, &stats) != full {
@@ -133,6 +132,22 @@ fn states_of_all_maps() {
             }
         }
 
+        // a week of turns: everybody ends their turn seven times; neutral monsters grow,
+        // nobody else does
+        let before: i32 = state.armies.iter().filter(|a| a.owner.is_none()).flat_map(|a| a.army.stacks()).map(|s| s.count).sum();
+        let owned: i32 = state.armies.iter().filter(|a| a.owner.is_some()).flat_map(|a| a.army.stacks()).map(|s| s.count).sum();
+        let alive = state.players.iter().filter(|p| p.alive).count().max(1);
+        for _ in 0..7 * alive {
+            turns::end_turn(&mut state, &stats);
+        }
+        let after: i32 = state.armies.iter().filter(|a| a.owner.is_none()).flat_map(|a| a.army.stacks()).map(|s| s.count).sum();
+        let owned_after: i32 = state.armies.iter().filter(|a| a.owner.is_some()).flat_map(|a| a.army.stacks()).map(|s| s.count).sum();
+        if state.day != 8 || owned_after != owned || after < before {
+            failures.push(format!("{name}: after a week day {}, neutrals {before} -> {after}, owned {owned} -> {owned_after}", state.day));
+        }
+        grown += (after - before) as i64;
+        neutrals += before as i64;
+
         for level in 0..state.map.levels {
             for row in 0..state.map.size {
                 for col in 0..state.map.size {
@@ -145,6 +160,7 @@ fn states_of_all_maps() {
     println!("{} maps, {armies} armies, {blocked_tiles} blocked tiles", files.len());
     println!("{} armies stand on a blocking object: {on_objects:?}", on_objects.len());
     println!("{paths} paths to the nearest monster, {unreachable_monsters} monsters out of reach");
+    println!("neutral creatures: {neutrals}, grew by {grown} in a week");
     assert!(armies > 5000, "only {armies} armies");
     // a few are the maps' own quirks, many would mean footprints are put down wrong
     assert!(on_objects.len() * 100 < armies, "{} armies on blocked tiles", on_objects.len());
