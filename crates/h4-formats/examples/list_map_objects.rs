@@ -31,7 +31,7 @@ fn main() {
                     .filter_map(|s| match s {
                         Stack::Empty => None,
                         Stack::Creatures { kind, count, .. } => Some(format!("{count}x#{kind}")),
-                        Stack::Hero(h) => Some(format!("hero #{} {}", h.portrait, h.name)),
+                        Stack::Hero(h) => Some(format!("hero #{} class {} gender {} {}", h.portrait, h.class, h.gender, h.name)),
                     })
                     .collect();
                 println!("{at}  army owner {owner}: {}", stacks.join(", "));

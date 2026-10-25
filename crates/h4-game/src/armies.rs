@@ -11,6 +11,7 @@ use h4_formats::map::MapFile;
 use h4_formats::map_army::Stack;
 use h4_formats::map_body::ObjectKind;
 use h4_rules::creatures::KEYWORDS;
+use h4_rules::heroes;
 use h4_rules::placement::Placement;
 
 use crate::world::{Pos, World};
@@ -39,23 +40,28 @@ pub fn map_armies(
         if o.level != level as i32 {
             continue;
         }
-        let (has_hero, creature) = match (&o.kind, placements.get(i)) {
+        // the hero leading the army, if there is one, else the first creature
+        let (leader, creature) = match (&o.kind, placements.get(i)) {
             (ObjectKind::Army { army, .. }, _) => {
-                let has_hero = army.stacks.iter().any(|s| matches!(s, Stack::Hero(_)));
+                let leader = army.stacks.iter().find_map(|s| match s {
+                    Stack::Hero(h) => Some(h),
+                    _ => None,
+                });
                 let creature = army.stacks.iter().find_map(|s| match s {
                     Stack::Creatures { kind, .. } => KEYWORDS.get(*kind as usize),
                     _ => None,
                 });
-                (has_hero, creature)
+                (leader, creature)
             }
             (ObjectKind::Placed(_), Some(Some(Placement::Monster { stacks }))) => {
-                (false, stacks.first().and_then(|&(c, _)| KEYWORDS.get(c)))
+                (None, stacks.first().and_then(|&(c, _)| KEYWORDS.get(c)))
             }
             _ => continue,
         };
-        let actor = if has_hero {
-            // TODO: pick the hero's own model by class and gender; one model for all for now
-            Some(hero.to_string())
+        let actor = if let Some(h) = leader {
+            // A hero the map leaves random (class or gender -1) gets them when the game
+            // starts (`t_hero::derandomize`, not traced yet); until then the default model.
+            Some(heroes::adv_model_name(h.class, h.gender).unwrap_or_else(|| hero.to_string()))
         } else {
             creature.and_then(|c| actors.get(&normalize(c)).cloned())
         };

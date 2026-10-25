@@ -7,9 +7,11 @@
 //! - [`random`]: the game's two random number generators, bit-exact.
 //! - [`damage`]: damage of one stack hitting another.
 //! - [`creatures`]: creature statistics from `table.creatures`.
+//! - [`heroes`]: hero classes and hero models on the map.
 //! - [`placement`]: what the random objects of a map become when a game starts.
 
 pub mod creatures;
 pub mod damage;
+pub mod heroes;
 pub mod placement;
 pub mod random;

@@ -84,7 +84,9 @@ fn read_artifact_list(r: &mut Reader) -> Result<Vec<u16>> {
 pub struct Hero {
     /// Portrait / hero id; -1 = random.
     pub portrait: i16,
-    /// Class and gender bytes; -1 = random (meaning of the values not checked).
+    /// Class (0..=10 a base class: knight, priest, lord, mage, death knight, necromancer,
+    /// thief, sorcerer, archer, druid, barbarian) and gender (1 male, 0 female); -1 = random.
+    /// Meanings from the exe's class table and hero model code, see `h4_rules::heroes`.
     pub class: i8,
     pub gender: i8,
     /// Custom name and biography (empty = the default for the portrait).

@@ -93,3 +93,20 @@ fn random_objects_of_all_maps() {
         panic!("{} problems:\n  {}", failures.len(), failures.join("\n  "));
     }
 }
+
+/// Every base class in both genders has its hero model in the archives.
+#[test]
+fn hero_models_exist() {
+    let dir = data_dir(None);
+    if !dir.is_dir() {
+        println!("skipped: no game data at {}", dir.display());
+        return;
+    }
+    let res = Resources::open(&dir).expect("open resources");
+    for class in 0..11 {
+        for gender in 0..2 {
+            let name = h4_rules::heroes::adv_model_name(class, gender).expect("base class");
+            assert!(res.entry(&format!("adv_actor.{name}.h4d")).is_some(), "no adv_actor.{name}");
+        }
+    }
+}
