@@ -6,7 +6,7 @@ mod common;
 use std::path::{Path, PathBuf};
 
 use h4_formats::map::{search_tiles_start, MapFile};
-use h4_formats::map_body::ObjectKind;
+use h4_formats::map_body::{ObjectKind, Placed, RandomLink};
 
 /// Maps in `maps/` (86) and `maps/Contest Maps/` (20) of our installation.
 const MAP_COUNT: usize = 106;
@@ -57,6 +57,7 @@ fn maps_read_through_objects_to_tiles() {
         // a margin; a misread position would be far off.
         let size = map.header.size as i32;
         let levels = map.header.levels as i32;
+        let players: Vec<u8> = map.header.players.iter().map(|p| p.color).collect();
         let near_map = -8..size + 8;
         for o in &body.objects {
             if !near_map.contains(&o.x) || !near_map.contains(&o.y) || !(0..levels).contains(&o.level) {
@@ -66,8 +67,28 @@ fn maps_read_through_objects_to_tiles() {
                 if res.entry(&format!("adv_object.{}.h4d", p.model)).is_none() {
                     failures.push(format!("{name}: no model adv_object.{}", p.model));
                 }
+                check_owner(&name, &players, p, &mut failures);
+                if let Some(RandomLink::Player(c)) = &p.random_link {
+                    if *c > 6 {
+                        failures.push(format!("{name}: {} tied to player {c}", p.type_name));
+                    }
+                }
             }
         }
     }
     common::assert_no_failures("maps", &failures);
+}
+
+/// The owner of a town is nobody (6) or one of the map's players. Only towns: one garrison
+/// on "Final Grounds" belongs to color 2 on a two-player map (0 and 1), probably left over
+/// in the editor.
+fn check_owner(map: &str, players: &[u8], p: &Placed, failures: &mut Vec<String>) {
+    if !matches!(p.type_name.as_str(), "town" | "random_town") {
+        return;
+    }
+    if let Some(o) = p.owner {
+        if o != 6 && !players.contains(&o) {
+            failures.push(format!("{map}: {} {:?} owned by {o}, players {players:?}", p.type_name, p.model));
+        }
+    }
 }

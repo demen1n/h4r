@@ -62,8 +62,12 @@ const MAX_VERSION: u16 = 29;
 #[derive(Debug, Clone)]
 pub struct MapHeader {
     pub version: u16,
-    /// Present from version 28 on; 0, 1 or 2 in the installed maps. Meaning unknown.
-    pub unknown_a: u16,
+    /// Present from version 28 on (0 before). Most likely the expansion the map needs:
+    /// 0 base game, 1 Gathering Storm, 2 Winds of War. The 31 version-27 maps all have 0,
+    /// "Bandits of the Rifen Maze" and other Winds of War maps 2. The game compares it with
+    /// a creature's expansion when it picks random monsters (`map + 0x20c`, rva `3f3310`);
+    /// that this field lands at `+0x20c` is inferred from offsets, not traced.
+    pub expansion: u16,
     /// Width and height in tiles (the map is a diamond inside this square, see [`row_ranges`]).
     pub size: u16,
     /// 1, or 2 with an underground level.
@@ -248,7 +252,7 @@ impl MapHeader {
         if !(MIN_VERSION..=MAX_VERSION).contains(&version) {
             return bad(format!("map version {version}, expected {MIN_VERSION}..={MAX_VERSION}"));
         }
-        let unknown_a = if version >= 28 { r.u16()? } else { 0 };
+        let expansion = if version >= 28 { r.u16()? } else { 0 };
         let size = r.u16()?;
         let levels = r.u8()?;
         let unknown_b = r.u32()?;
@@ -312,7 +316,7 @@ impl MapHeader {
 
         let header = MapHeader {
             version,
-            unknown_a,
+            expansion,
             size,
             levels,
             unknown_b,

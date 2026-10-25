@@ -1,7 +1,8 @@
 //! Armies standing on a real map: wandering monsters and heroes (`ObjectKind::Army`).
 //!
 //! An army is drawn as one animated figure, like in the game: a hero if it has one,
-//! otherwise its first creature stack.
+//! otherwise its first creature stack. Random monsters are armies too, once
+//! `h4_rules::placement` has chosen their creatures.
 
 use std::collections::HashMap;
 
@@ -9,27 +10,10 @@ use h4_formats::archive::Resources;
 use h4_formats::map::MapFile;
 use h4_formats::map_army::Stack;
 use h4_formats::map_body::ObjectKind;
+use h4_rules::creatures::KEYWORDS;
+use h4_rules::placement::Placement;
 
 use crate::world::{Pos, World};
-
-/// Creature keywords in the order of the game's creature enum, so `CREATURES[kind]` names
-/// the creature a map stack stores as `kind`. Taken from the exe's keyword table at VA
-/// `0x985574` (pairs of id + name, ids 0..73). Checked on all installed maps: with this
-/// order high-level creatures come in small stacks and low-level ones in big stacks
-/// (correlation of level with log(count) −0.80; reading the pairs the other way gives 0.03).
-const CREATURES: [&str; 74] = [
-    "air elemental", "archangel", "ballista", "bandit", "behemoth", "beholder", "black dragon",
-    "bone dragon", "centaur", "cerberus", "champion", "crossbowman", "crusader", "cyclops",
-    "venom spawn", "archdevil", "dragon golem", "dwarf", "earth elemental", "efreet", "elf",
-    "faerie dragon", "fire elemental", "gargoyle", "genie", "ghost", "berserker", "gold golem",
-    "griffin", "halfling", "harpy", "hydra", "ice demon", "imp", "leprechaun", "mage", "mantis",
-    "medusa", "mermaid", "minotaur", "monk", "mummy", "naga", "nightmare", "nomad", "ogre mage",
-    "orc", "peasant", "phoenix", "pikeman", "pirate", "satyr", "sea monster", "skeleton",
-    "squire", "sprite", "thunderbird", "titan", "troglodyte", "troll", "unicorn", "vampire",
-    "water elemental", "white tiger", "wolf", "zombie", "waspwort", "goblin knight",
-    "evil sorceress", "gargantuan", "dark champion", "catapult", "frenzied gnasher",
-    "mega dragon",
-];
 
 /// One army to put on the map: which `adv_actor` to animate and where.
 pub struct MapArmy {
@@ -37,22 +21,38 @@ pub struct MapArmy {
     pub at: Pos,
 }
 
-/// The armies of `level`. Their tiles are marked taken and blocked, so the hero walks
+/// The armies of `level`, and the random monsters that became armies (`placements`, one
+/// entry per map object). Their tiles are marked taken and blocked, so the hero walks
 /// around them (in the game stepping on one starts a fight, which we don't have yet).
-pub fn map_armies(res: &Resources, world: &mut World, map: &MapFile, level: usize, hero: &str) -> Vec<MapArmy> {
+pub fn map_armies(
+    res: &Resources,
+    world: &mut World,
+    map: &MapFile,
+    placements: &[Option<Placement>],
+    level: usize,
+    hero: &str,
+) -> Vec<MapArmy> {
     let Ok(body) = &map.body else { return Vec::new() };
     let actors = actor_names(res);
     let mut out = Vec::new();
-    for o in &body.objects {
-        let ObjectKind::Army { army, .. } = &o.kind else { continue };
+    for (i, o) in body.objects.iter().enumerate() {
         if o.level != level as i32 {
             continue;
         }
-        let has_hero = army.stacks.iter().any(|s| matches!(s, Stack::Hero(_)));
-        let creature = army.stacks.iter().find_map(|s| match s {
-            Stack::Creatures { kind, .. } => CREATURES.get(*kind as usize),
-            _ => None,
-        });
+        let (has_hero, creature) = match (&o.kind, placements.get(i)) {
+            (ObjectKind::Army { army, .. }, _) => {
+                let has_hero = army.stacks.iter().any(|s| matches!(s, Stack::Hero(_)));
+                let creature = army.stacks.iter().find_map(|s| match s {
+                    Stack::Creatures { kind, .. } => KEYWORDS.get(*kind as usize),
+                    _ => None,
+                });
+                (has_hero, creature)
+            }
+            (ObjectKind::Placed(_), Some(Some(Placement::Monster { stacks }))) => {
+                (false, stacks.first().and_then(|&(c, _)| KEYWORDS.get(c)))
+            }
+            _ => continue,
+        };
         let actor = if has_hero {
             // TODO: pick the hero's own model by class and gender; one model for all for now
             Some(hero.to_string())

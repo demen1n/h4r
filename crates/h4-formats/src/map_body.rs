@@ -70,6 +70,24 @@ pub struct Placed {
     pub garrison: Option<Army>,
     /// The hero of a prison.
     pub hero: Option<Hero>,
+    /// What a random object (`random_town`, `random_monster`, `random_shrine`...) is tied
+    /// to when the game picks what it becomes. `None` for objects that don't store it.
+    pub random_link: Option<RandomLink>,
+    /// Strength of a random monster set by the map maker, `(min, max)`, in units of a
+    /// peasant's experience (the game multiplies them by it, rva `3f38a0`). `None` means
+    /// the default range for the monster's level.
+    pub monster_range: Option<(i32, i32)>,
+}
+
+/// The "random object kind" (rva `75c950`): how a random object chooses its alignment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RandomLink {
+    /// Not tied to anything: chosen at random.
+    None,
+    /// The alignment of the player with this color.
+    Player(u8),
+    /// The type of the town with this name.
+    Town(String),
 }
 
 /// Read the body starting at `r.pos` (right after the header). `players` are the colors of
@@ -275,7 +293,18 @@ fn read_placed(r: &mut Reader) -> Result<Placed> {
     let major = r.str16()?;
     r.u16()?;
     let minor = r.str16()?;
-    let mut p = Placed { model, type_name, major, minor, owner: None, name: None, garrison: None, hero: None };
+    let mut p = Placed {
+        model,
+        type_name,
+        major,
+        minor,
+        owner: None,
+        name: None,
+        garrison: None,
+        hero: None,
+        random_link: None,
+        monster_range: None,
+    };
     read_placed_body(r, &mut p)?;
     Ok(p)
 }
@@ -377,7 +406,7 @@ fn read_placed_body(r: &mut Reader, p: &mut Placed) -> Result<()> {
                 };
                 p.owner = read_owned_scriptable(r, base_version)?;
                 if v >= 2 {
-                    read_random_kind(r)?;
+                    p.random_link = Some(read_random_kind(r)?);
                 }
             }
             "random_conservatory" => {
@@ -387,7 +416,7 @@ fn read_placed_body(r: &mut Reader, p: &mut Placed) -> Result<()> {
                     read_spell_set(r)?;
                 }
                 if v >= 1 {
-                    read_random_kind(r)?;
+                    p.random_link = Some(read_random_kind(r)?);
                 }
             }
             "random_monster" | "random_random_monster" => {
@@ -401,10 +430,14 @@ fn read_placed_body(r: &mut Reader, p: &mut Placed) -> Result<()> {
                     read_owned_events(r, 3)?;
                 }
                 if v >= 1 {
-                    read_random_kind(r)?;
+                    p.random_link = Some(read_random_kind(r)?);
                 }
-                if v >= 4 && r.i32()? >= 0 {
-                    r.i32()?;
+                // a minimum of -1 means "default", then no maximum follows
+                if v >= 4 {
+                    let min = r.i32()?;
+                    if min >= 0 {
+                        p.monster_range = Some((min, r.i32()?));
+                    }
                 }
             }
             "random_shrine" => {
@@ -415,7 +448,7 @@ fn read_placed_body(r: &mut Reader, p: &mut Placed) -> Result<()> {
                     read_spell_set(r)?;
                 }
                 if v >= 3 {
-                    read_random_kind(r)?;
+                    p.random_link = Some(read_random_kind(r)?);
                 }
             }
             "shrine" => {
@@ -429,12 +462,12 @@ fn read_placed_body(r: &mut Reader, p: &mut Placed) -> Result<()> {
             "random_teacher" => {
                 if version(r, 1, t)? >= 1 {
                     r.u16()?;
-                    read_random_kind(r)?;
+                    p.random_link = Some(read_random_kind(r)?);
                 }
             }
             "random_temple" => {
                 if version(r, 1, t)? >= 1 {
-                    read_random_kind(r)?;
+                    p.random_link = Some(read_random_kind(r)?);
                 }
             }
             "quest_gate" | "quest_guard" | "seers_hut" => read_quest_site(r, t)?,
@@ -445,7 +478,7 @@ fn read_placed_body(r: &mut Reader, p: &mut Placed) -> Result<()> {
                 if v != 7 {
                     return bad(format!("random town: version {v} (only 7 is known) at {at:#x}"));
                 }
-                read_random_kind(r)?;
+                p.random_link = Some(read_random_kind(r)?);
                 read_town_data(r, p)?;
             }
             "town" => {
@@ -507,20 +540,15 @@ fn read_garrisonable(r: &mut Reader, p: &mut Placed) -> Result<()> {
 
 /// How a random object picks its owner/kind (rva `75c950`): version 0, a name from
 /// `none`, `player`, `town` (table at `98ad44`), then a player byte or a town name.
-fn read_random_kind(r: &mut Reader) -> Result<()> {
+fn read_random_kind(r: &mut Reader) -> Result<RandomLink> {
     zero_version(r, "random object kind")?;
     let at = r.pos;
-    match r.str16()?.as_str() {
-        "none" => {}
-        "player" => {
-            r.u8()?;
-        }
-        "town" => {
-            text(r)?;
-        }
+    Ok(match r.str16()?.as_str() {
+        "none" => RandomLink::None,
+        "player" => RandomLink::Player(r.u8()?),
+        "town" => RandomLink::Town(text(r)?),
         other => return bad(format!("random object kind {other:?} at {at:#x}")),
-    }
-    Ok(())
+    })
 }
 
 /// `t_abstract_town::read_map_data` (rva `417640`), versions 6..8.
@@ -530,10 +558,13 @@ fn read_town_data(r: &mut Reader, p: &mut Placed) -> Result<()> {
     if !(6..=8).contains(&v) {
         return bad(format!("town data: unknown version {v} at {at:#x}"));
     }
-    let town_type = r.u8()?;
-    if town_type > 6 {
-        return bad(format!("town type {town_type} at {:#x}", r.pos - 1));
+    // The owner's color, 6 = nobody: on all installed maps it is 6 or the color of one of
+    // the map's players (659 towns). The town's faction is in its model and type instead.
+    let owner = r.u8()?;
+    if owner > 6 {
+        return bad(format!("town owner {owner} at {:#x}", r.pos - 1));
     }
+    p.owner = Some(owner);
     p.name = Some(text(r)?);
     // garrison
     if r.u8()? != 0 {

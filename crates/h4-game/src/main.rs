@@ -16,6 +16,10 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use h4_formats::archive::{data_dir, Resources};
+use h4_formats::table::Table;
+use h4_rules::creatures::{self, CreatureStats};
+use h4_rules::placement::{place_random_objects, Placement, Setup};
+use h4_rules::random::GlobalRandom;
 use macroquad::prelude::*;
 
 use actor_view::Actors;
@@ -67,7 +71,16 @@ enum Upright<'a> {
 /// The objects of a real map on `level`, at the positions stored in the map. They are put
 /// down as they are (no check for free cells: the map maker already arranged them), and
 /// their cells are marked taken / blocked for the path finder.
-fn map_objects(res: &Resources, world: &mut World, map: &h4_formats::map::MapFile, level: usize) -> Vec<Placed> {
+///
+/// Random objects are drawn as what they became (`placements`, one entry per map object);
+/// random monsters are armies and drawn by `armies::map_armies`.
+fn map_objects(
+    res: &Resources,
+    world: &mut World,
+    map: &h4_formats::map::MapFile,
+    placements: &[Option<Placement>],
+    level: usize,
+) -> Vec<Placed> {
     let body = match &map.body {
         Ok(body) => body,
         Err(e) => {
@@ -77,13 +90,19 @@ fn map_objects(res: &Resources, world: &mut World, map: &h4_formats::map::MapFil
     };
     let mut kinds: HashMap<&str, Option<Rc<ObjectKind>>> = HashMap::new();
     let mut placed = Vec::new();
-    for o in &body.objects {
+    for (i, o) in body.objects.iter().enumerate() {
         // armies (heroes, wandering creatures) are put down by `armies::map_armies`
         let h4_formats::map_body::ObjectKind::Placed(p) = &o.kind else { continue };
         if o.level != level as i32 {
             continue;
         }
-        let kind = kinds.entry(p.model.as_str()).or_insert_with(|| ObjectKind::load(res, &p.model).map(Rc::new));
+        let placement = placements.get(i).and_then(|p| p.as_ref());
+        // a random monster is an army now, or nothing if no creature fitted
+        if matches!(p.type_name.as_str(), "random_monster" | "random_random_monster") {
+            continue;
+        }
+        let model = placement.and_then(|p| p.model()).unwrap_or(&p.model);
+        let kind = kinds.entry(model).or_insert_with(|| ObjectKind::load(res, model).map(Rc::new));
         let Some(kind) = kind else { continue };
         // the stored x is our row, y our column. Checked on all maps of the installation:
         // this way 77% of sand decorations stand on sand and bridges mostly on water,
@@ -104,6 +123,29 @@ fn map_objects(res: &Resources, world: &mut World, map: &h4_formats::map::MapFil
         placed.push(Placed { kind: kind.clone(), at });
     }
     placed
+}
+
+/// Creature stats in game enum order, for random monsters and dwellings.
+fn creature_stats(res: &Resources) -> Result<Vec<CreatureStats>, String> {
+    let data = res.read("table.creatures.h4d").map_err(|e| e.to_string())?;
+    let table = Table::read(&data, "table.creatures").map_err(|e| e.to_string())?;
+    creatures::in_enum_order(&creatures::from_table(&table)?)
+}
+
+/// Decide what the map's random objects become, as the game does at the start. The seed is
+/// fixed (or `H4_SEED`), so the same map looks the same every time; the game uses the clock.
+fn random_placements(res: &Resources, map: &h4_formats::map::MapFile) -> Vec<Option<Placement>> {
+    let stats = match creature_stats(res) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("random objects stay random: {e}");
+            return Vec::new();
+        }
+    };
+    let seed = std::env::var("H4_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(1);
+    // normal difficulty
+    let setup = Setup::from_header(&map.header, 1);
+    place_random_objects(map, &stats, &setup, &mut GlobalRandom::new(seed))
 }
 
 /// Buildings placed by hand near the hero's start, then forests and mountains scattered
@@ -207,6 +249,10 @@ async fn main() {
         h4_formats::map::MapFile::read(&bytes, &path).unwrap_or_else(|e| panic!("{e}"))
     });
     let level = std::env::var("H4_LEVEL").ok().and_then(|l| l.parse().ok()).unwrap_or(0);
+    let placements = match &real_map {
+        Some(map) => random_placements(&res, map),
+        None => Vec::new(),
+    };
     let mut world = match &real_map {
         Some(map) => World::from_map(map, level.min(map.header.levels as usize - 1)),
         None => World::generate(40, 40),
@@ -227,11 +273,13 @@ async fn main() {
     let actors = Actors::new(&res);
     // a real map's own objects go down first, so the hero doesn't start inside one
     let map_placed = match &real_map {
-        Some(map) => map_objects(&res, &mut world, map, level.min(map.header.levels as usize - 1)),
+        Some(map) => map_objects(&res, &mut world, map, &placements, level.min(map.header.levels as usize - 1)),
         None => Vec::new(),
     };
     let map_armies = match &real_map {
-        Some(map) => armies::map_armies(&res, &mut world, map, level.min(map.header.levels as usize - 1), HERO),
+        Some(map) => {
+            armies::map_armies(&res, &mut world, map, &placements, level.min(map.header.levels as usize - 1), HERO)
+        }
         None => Vec::new(),
     };
 

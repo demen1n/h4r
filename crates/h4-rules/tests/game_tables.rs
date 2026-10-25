@@ -41,5 +41,12 @@ fn creature_table() {
         assert!(c.hit_points > 0, "{}: {} hit points", c.keyword, c.hit_points);
         assert!(0 < c.damage_low && c.damage_low <= c.damage_high, "{}: damage {}-{}", c.keyword, c.damage_low, c.damage_high);
         assert!(c.attack > 0 && c.defense > 0, "{}: attack {} defense {}", c.keyword, c.attack, c.defense);
+        assert!(c.experience > 0, "{}: experience {}", c.keyword, c.experience);
     }
+
+    // every creature of the game's enum has a row, and the table has nothing else
+    let by_id = creatures::in_enum_order(&all).expect("creatures in enum order");
+    assert_eq!(by_id.len(), all.len());
+    assert_eq!((by_id[47].keyword.as_str(), by_id[47].experience), ("peasant", 4));
+    assert_eq!(creatures::TOWN_TYPES[by_id[46].alignment], "asylum", "orcs are chaos");
 }

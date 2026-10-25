@@ -1,4 +1,5 @@
-//! Creature statistics from `table.creatures` (hit points, damage, attack, defense...).
+//! Creature statistics from `table.creatures` (hit points, damage, attack, defense...)
+//! and the creature numbering the game uses everywhere else (maps, saves, code).
 
 use h4_formats::table::Table;
 
@@ -18,6 +19,64 @@ pub struct CreatureStats {
     pub speed: i32,
     pub movement: i32,
     pub shots: i32,
+    /// Town type the creature belongs to (see [`TOWN_TYPES`]); the table calls it
+    /// alignment. In the exe it is at `+0x44` of the creature traits (rva `255390`).
+    pub alignment: usize,
+    /// Experience a hero gets for killing one; the game also measures the strength of
+    /// random monsters with it (`+0x74` of the traits).
+    pub experience: i32,
+}
+
+/// Town types in the game's order (the order of the town model names at VA `0xa5b6c8`).
+/// The creature table names them by magic: life, order, death, chaos, nature, might.
+pub const TOWN_TYPES: [&str; 6] = ["haven", "academy", "necropolis", "asylum", "preserve", "stronghold"];
+
+/// The alignment names of `table.creatures`, in [`TOWN_TYPES`] order.
+const ALIGNMENTS: [&str; 6] = ["life", "order", "death", "chaos", "nature", "might"];
+
+/// Creature keywords in the order of the game's creature enum, so `KEYWORDS[id]` names
+/// the creature a map or the code calls `id`. Taken from the exe's keyword table at VA
+/// `0x985574` (pairs of id + name, ids 0..73). Checked on all installed maps: with this
+/// order high-level creatures come in small stacks and low-level ones in big stacks
+/// (correlation of level with log(count) −0.80; reading the pairs the other way gives 0.03).
+/// The code agrees too: it treats 38, 50 and 52 (mermaid, pirate, sea monster) as the
+/// water creatures and 47 (peasant) as the unit of monster strength (rva `3f3310`, `3f38a0`).
+pub const KEYWORDS: [&str; 74] = [
+    "air elemental", "archangel", "ballista", "bandit", "behemoth", "beholder", "black dragon",
+    "bone dragon", "centaur", "cerberus", "champion", "crossbowman", "crusader", "cyclops",
+    "venom spawn", "archdevil", "dragon golem", "dwarf", "earth elemental", "efreet", "elf",
+    "faerie dragon", "fire elemental", "gargoyle", "genie", "ghost", "berserker", "gold golem",
+    "griffin", "halfling", "harpy", "hydra", "ice demon", "imp", "leprechaun", "mage", "mantis",
+    "medusa", "mermaid", "minotaur", "monk", "mummy", "naga", "nightmare", "nomad", "ogre mage",
+    "orc", "peasant", "phoenix", "pikeman", "pirate", "satyr", "sea monster", "skeleton",
+    "squire", "sprite", "thunderbird", "titan", "troglodyte", "troll", "unicorn", "vampire",
+    "water elemental", "white tiger", "wolf", "zombie", "waspwort", "goblin knight",
+    "evil sorceress", "gargantuan", "dark champion", "catapult", "frenzied gnasher",
+    "mega dragon",
+];
+
+/// Which game a creature came with: 0 the base game, 1 and 2 the creatures the exe lists
+/// at VA `0x985550` (ids 67..=70) and `0x985560` (71..=73). Stored at `+0xdc` of the traits.
+pub fn expansion(id: usize) -> i32 {
+    match id {
+        67..=70 => 1,
+        71..=73 => 2,
+        _ => 0,
+    }
+}
+
+/// The table's rows put in game enum order: `result[id]` is the creature the game calls
+/// `id`. Fails if a keyword of [`KEYWORDS`] has no row.
+pub fn in_enum_order(rows: &[CreatureStats]) -> Result<Vec<CreatureStats>, String> {
+    KEYWORDS
+        .iter()
+        .map(|k| {
+            rows.iter()
+                .find(|c| c.keyword.eq_ignore_ascii_case(k))
+                .cloned()
+                .ok_or(format!("table.creatures has no {k:?}"))
+        })
+        .collect()
 }
 
 /// Turn the table into stats. Fails with a message if a column is missing or a cell that
@@ -37,6 +96,8 @@ pub fn from_table(table: &Table) -> Result<Vec<CreatureStats>, String> {
     let speed = col("Speed")?;
     let movement = col("Move")?;
     let shots = col("Shots")?;
+    let alignment = col("Alignment")?;
+    let experience = col("Experience")?;
 
     let mut out = Vec::new();
     for (i, row) in table.data_rows().iter().enumerate() {
@@ -54,6 +115,11 @@ pub fn from_table(table: &Table) -> Result<Vec<CreatureStats>, String> {
         if text(keyword).is_empty() || text(hit_points).is_empty() {
             continue;
         }
+        // the table writes these in mixed case ("Life", "death")
+        let align_name = text(alignment).to_lowercase();
+        let Some(align) = ALIGNMENTS.iter().position(|a| *a == align_name) else {
+            return Err(format!("table.creatures row {}: unknown alignment {align_name:?}", i + 1));
+        };
         out.push(CreatureStats {
             keyword: text(keyword).to_string(),
             name: text(name).to_string(),
@@ -66,6 +132,8 @@ pub fn from_table(table: &Table) -> Result<Vec<CreatureStats>, String> {
             speed: number(speed)?,
             movement: number(movement)?,
             shots: number(shots)?,
+            alignment: align,
+            experience: number(experience)?,
         });
     }
     Ok(out)
