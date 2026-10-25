@@ -80,6 +80,10 @@ pub struct Placed {
     /// peasant's experience (the game multiplies them by it, rva `3f38a0`). `None` means
     /// the default range for the monster's level.
     pub monster_range: Option<(i32, i32)>,
+    /// Primary skills a random teacher may teach, bit i = skill i (tactics, combat,
+    /// scouting, nobility, then the five magic schools); `None` = all nine (`0x1ff`, the
+    /// default of `t_random_altar`, rva `2dcf0`).
+    pub teacher_skills: Option<u16>,
 }
 
 /// The "random object kind" (rva `75c950`): how a random object chooses its alignment.
@@ -309,6 +313,7 @@ fn read_placed(r: &mut Reader) -> Result<Placed> {
         hero: None,
         random_link: None,
         monster_range: None,
+        teacher_skills: None,
     };
     read_placed_body(r, &mut p)?;
     Ok(p)
@@ -464,9 +469,10 @@ fn read_placed_body(r: &mut Reader, p: &mut Placed) -> Result<()> {
                     read_spell_set(r)?;
                 }
             }
+            // t_random_altar (rva 2def0): the teacher of a primary skill
             "random_teacher" => {
                 if version(r, 1, t)? >= 1 {
-                    r.u16()?;
+                    p.teacher_skills = Some(r.u16()?);
                     p.random_link = Some(read_random_kind(r)?);
                 }
             }

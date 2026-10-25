@@ -49,6 +49,9 @@ pub enum Placement {
     Shrine { school: usize, level: u32, model: String },
     /// A temple of an alignment (life, order, death, chaos, nature).
     Temple { alignment: usize, model: String },
+    /// A teacher of a primary skill (0..=8: tactics, combat, scouting, nobility, life,
+    /// order, death, chaos, nature magic).
+    Teacher { skill: usize, model: String },
     /// An artifact (id, see [`crate::artifacts::KEYWORDS`]) lying on the map.
     Artifact { artifact: usize, model: String },
     /// The heroes of an army, in stack order, as (base class, male) once random classes
@@ -66,7 +69,8 @@ impl Placement {
             | Placement::WeeklyGenerator { model, .. }
             | Placement::Shrine { model, .. }
             | Placement::Temple { model, .. }
-            | Placement::Artifact { model, .. } => Some(model),
+            | Placement::Artifact { model, .. }
+            | Placement::Teacher { model, .. } => Some(model),
             Placement::Monster { .. } | Placement::Heroes(_) => None,
         }
     }
@@ -138,6 +142,13 @@ const DWELLING_MODELS: [&str; 74] = [
     "Ward_Sorcery", "Gargantuan_Dell", "Dark_Knights_Sanctum", "Siege_Workshop", "Beast_Pen", "",
 ];
 
+/// Teacher models by primary skill (VA `0x971d48`, used by the `t_adv_altar` constructor,
+/// rva `2d070`).
+const TEACHER_MODELS: [&str; 9] = [
+    "Scholars.Tactician", "Scholars.Combat", "Scholars.Scout", "Scholars.Noble", "Scholars.Priest",
+    "Scholars.Scholar", "Scholars.Lich", "Scholars.Sorcerer", "Scholars.Druid",
+];
+
 /// Shrine model names use the school with a capital letter: `shrines.Life 1`.
 const SCHOOLS: [&str; 5] = ["Life", "Order", "Death", "Chaos", "Nature"];
 
@@ -169,7 +180,7 @@ enum Link {
 /// the map body, `None` for objects that aren't random or that we don't handle yet.
 ///
 /// Not handled yet (their rolls are skipped, which shifts the numbers after them):
-/// the spell of a random shrine, random teachers and conservatories, heroes in prisons, stacks with
+/// the spell of a random shrine and conservatories, heroes in prisons, stacks with
 /// a random count in armies, and whatever the real objects created here roll in their own
 /// placement (towns, for example).
 pub fn place_random_objects(
@@ -288,6 +299,31 @@ impl State<'_> {
                     }
                     None => eprintln!("random dwelling {:?}: no creature fits", p.major),
                 }
+                false
+            }
+            // `t_random_altar` pre-placement (rva `2e000`): the skills the link allows (an
+            // alignment 0..=4 its magic school 4..=8, might the four might skills, any all
+            // nine), cut down to the map's choice; if that leaves none, the map's choice,
+            // then the link's. One roll picks among them.
+            "random_teacher" => {
+                let by_link: u16 = match link {
+                    Link::Later => return true,
+                    Link::Alignment(a) if a <= 4 => 1 << (4 + a),
+                    Link::Alignment(_) => 0b1111,
+                    Link::Any => 0x1ff,
+                };
+                let map_choice = p.teacher_skills.unwrap_or(0x1ff) & 0x1ff;
+                let mut skills = by_link & map_choice;
+                if skills == 0 {
+                    skills = map_choice;
+                }
+                if skills == 0 {
+                    skills = by_link;
+                }
+                let k = rng.next() % skills.count_ones();
+                // the k-th skill in the set, counting from skill 0
+                let skill = (0..9).filter(|s| skills & (1 << s) != 0).nth(k as usize).expect("k is below the count");
+                self.result[i] = Some(Placement::Teacher { skill, model: TEACHER_MODELS[skill].to_string() });
                 false
             }
             // the monster only remembers its alignment here; it is placed later

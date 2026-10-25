@@ -26,7 +26,7 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
 const HANDLED: &[&str] = &[
     "random_town", "random_monster", "random_random_monster", "random_creature_dwelling",
     "random_material_pile", "random_weekly_material_generator", "random_shrine", "random_temple",
-    "random_artifact", "random_potion", "random_staff", "random_tome",
+    "random_artifact", "random_potion", "random_staff", "random_tome", "random_teacher",
 ];
 
 #[test]

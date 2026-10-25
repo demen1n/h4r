@@ -43,6 +43,7 @@ fn main() {
             Placement::WeeklyGenerator { material, amount, model } => format!("{amount} {} a week ({model})", MATERIALS[*material]),
             Placement::Shrine { model, .. } => model.clone(),
             Placement::Temple { model, .. } => model.clone(),
+            Placement::Teacher { model, .. } => model.clone(),
             Placement::Artifact { artifact, model } => format!("{} ({model})", h4_rules::artifacts::KEYWORDS[*artifact]),
             Placement::Heroes(h) => {
                 let s: Vec<String> = h.iter().map(|&(c, m)| h4_rules::heroes::adv_model_name(c as i8, m as i8).unwrap_or_default()).collect();
