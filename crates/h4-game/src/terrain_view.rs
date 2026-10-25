@@ -479,33 +479,73 @@ impl TerrainView {
     }
 }
 
-/// Light and shade the ground by the map's vertex heights, so hills look round.
-///
-/// This is our own approximation, not the game's formula (that one is still to be found
-/// in the exe): light comes from the upper left of the screen, a slope facing it gets
-/// brighter, a slope facing away darker. Each vertex gets a brightness from the height
-/// difference of its neighbours, and pixels inside a tile blend the brightness of the
-/// tile's four corners.
-fn shade_by_height(canvas: &mut [u8], width: usize, map: &MapFile, level: usize, iso: &Iso) {
-    // how much one unit of height difference changes the brightness (picked by eye)
-    const STRENGTH: f32 = 1.0 / 60.0;
-    let size = map.header.size as i32;
-    let height = |row: i32, col: i32| -> Option<f32> {
+/// Light of a slope between two neighbouring vertices of a row, in 1/32768 (32768 = as
+/// is): `compute_edge_light`, rva `14230` (`decomp/heights.md`). `a` is the vertex with
+/// the smaller column. The light falls from the side of larger columns (the screen's lower
+/// right) at 45°: a slope down towards it is brighter, one up towards it darker. Brightness
+/// falls off linearly with the angle between the slope and the light, down to 1/6.
+fn edge_light(a: i32, b: i32) -> i32 {
+    use std::f64::consts::PI;
+    // the horizontal distance between two vertices, in height units (one per pixel)
+    let run = 64.0 / 2f64.sqrt();
+    let slope = ((a - b) as f64).atan2(run);
+    // the exe's steps: x = slope + 3π/4, folded back above π, minus π/2
+    let mut x = slope + PI * 0.75;
+    if x > PI {
+        x = 2.0 * PI - x;
+    }
+    x -= PI / 2.0;
+    if x <= 0.0 {
+        return 0x1555;
+    }
+    // the exe rounds the product to an integer (`__ftol`)
+    0x1555 + (x * 54614.0 / (PI / 2.0)).round() as i32
+}
+
+/// Light of a vertex: `compute_vertex_light`, rva `6820`. The mean of the slopes to its
+/// neighbours in the same row of vertices (columns ±1); at the ends of a row, the one slope
+/// there is. Only the row direction counts.
+fn vertex_light(map: &MapFile, level: usize, row: i32, col: i32) -> i32 {
+    let height = |col: i32| -> Option<i32> {
         if row < 0 || col < 0 {
             return None;
         }
-        map.height(level, row as usize, col as usize).map(f32::from)
+        map.height(level, row as usize, col as usize).map(i32::from)
     };
-    // Brightness of a vertex. Screen up-left is the direction of smaller columns (columns
-    // grow to the lower right), so ground rising towards larger columns faces the light.
-    // Rows (growing to the lower left) count half: their direction is only partly lit.
-    let brightness = |row: i32, col: i32| -> f32 {
-        let Some(here) = height(row, col) else { return 1.0 };
-        let along = |a: Option<f32>, b: Option<f32>| b.unwrap_or(here) - a.unwrap_or(here);
-        let slope = along(height(row, col - 1), height(row, col + 1)) + 0.5 * along(height(row - 1, col), height(row + 1, col));
-        (1.0 + STRENGTH * slope).clamp(0.6, 1.4)
-    };
+    let Some(here) = height(col) else { return 32768 };
+    match (height(col - 1), height(col + 1)) {
+        (Some(before), Some(after)) => (edge_light(before, here) + edge_light(here, after)) / 2,
+        (None, Some(after)) => edge_light(here, after),
+        (Some(before), None) => edge_light(before, here),
+        (None, None) => 32768,
+    }
+}
 
+/// Brightness of a pixel lit by `light` (1/32768), in sixteenths, as `do_apply_lighting`
+/// (rva `309520`) does it: `(light + 256) >> 11`, plus a quarter step spread over a 2×2
+/// checkerboard by the parity of the pixel's x and y, so the steps don't show as bands.
+fn light_level(light: i32, x: i32, y: i32) -> i32 {
+    let rounded = light + 256;
+    let (odd_x, odd_y) = (x & 1 == 1, y & 1 == 1);
+    let extra = match (rounded >> 9) & 3 {
+        1 => odd_x && odd_y,
+        2 => odd_x != odd_y,
+        3 => odd_x || odd_y,
+        _ => false,
+    };
+    (rounded >> 11) + extra as i32
+}
+
+/// Light and shade the ground by the map's vertex heights, with the exe's formulas
+/// (`decomp/heights.md`): every vertex gets a light from the slopes along its row, and
+/// the pixels of a tile take it from the tile's corners. The ground is not raised yet,
+/// as the game does: here it stays flat and only the light shows the hills.
+///
+/// How the game spreads the corner lights over a tile isn't decompiled yet; here it is
+/// linear over the two triangles the game cuts a tile into for raising it (split along
+/// the vertical diagonal).
+fn shade_by_height(canvas: &mut [u8], width: usize, map: &MapFile, level: usize, iso: &Iso) {
+    let size = map.header.size as i32;
     for row in 0..size {
         for col in 0..size {
             if map.tile(level, row as usize, col as usize).is_none() {
@@ -513,33 +553,69 @@ fn shade_by_height(canvas: &mut [u8], width: usize, map: &MapFile, level: usize,
             }
             // corners: top = vertex (row, col), right = (row, col + 1),
             // left = (row + 1, col), bottom = (row + 1, col + 1)
-            let top = brightness(row, col);
-            let right = brightness(row, col + 1);
-            let left = brightness(row + 1, col);
-            let bottom = brightness(row + 1, col + 1);
+            let top = vertex_light(map, level, row, col) as f32;
+            let right = vertex_light(map, level, row, col + 1) as f32;
+            let left = vertex_light(map, level, row + 1, col) as f32;
+            let bottom = vertex_light(map, level, row + 1, col + 1) as f32;
+            if [top, right, left, bottom] == [32768.0; 4] {
+                continue; // flat: nothing changes
+            }
             let (x0, y0) = iso.tile_corner(Pos { col, row });
             for py in 0..TILE_HEIGHT as i32 {
                 for px in 0..TILE_WIDTH as i32 {
-                    // position inside the diamond: a runs along the column axis, b along rows
-                    let u = (px as f32 + 0.5 - 32.0) / 32.0;
-                    let v = (py as f32 + 0.5 - 16.0) / 16.0;
-                    let a = (u + v) / 2.0 + 0.5;
-                    let b = (v - u) / 2.0 + 0.5;
-                    if !(0.0..1.0).contains(&a) || !(0.0..1.0).contains(&b) {
+                    // inside the diamond: u from the left corner (0) to the right one (2),
+                    // v from the top corner (0) to the bottom one (1)
+                    let u = (px as f32 + 0.5) / 32.0;
+                    let v = (py as f32 + 0.5) / 32.0;
+                    let side = 1.0 - (u - 1.0).abs(); // 0 at the left/right corner, 1 in the middle
+                    if (v - 0.5).abs() > side / 2.0 {
                         continue;
                     }
-                    let light = top * (1.0 - a) * (1.0 - b) + right * a * (1.0 - b) + left * (1.0 - a) * b + bottom * a * b;
+                    // along the middle column the light goes from top to bottom; towards the
+                    // side corner it moves linearly to that corner's light
+                    let middle = if side > 0.0 { top + (bottom - top) * ((v - 0.5 + side / 2.0) / side) } else { top };
+                    let corner = if u < 1.0 { left } else { right };
+                    let light = corner + (middle - corner) * side;
                     let (x, y) = (x0 + px, y0 + py);
                     if x < 0 || y < 0 || x as usize >= width {
                         continue;
                     }
+                    let level = light_level(light.round() as i32, x, y);
                     let i = 4 * (y as usize * width + x as usize);
                     let Some(pixel) = canvas.get_mut(i..i + 3) else { continue };
                     for c in pixel {
-                        *c = (*c as f32 * light).min(255.0) as u8;
+                        *c = (*c as i32 * level / 16).min(255) as u8;
                     }
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn edge_light_of_slopes() {
+        // flat ground is lit as is
+        assert_eq!(edge_light(10, 10), 32768);
+        // down towards larger columns is brighter, up is darker, by the same amount
+        let (down, up) = (edge_light(16, 0), edge_light(0, 16));
+        assert!(down > 32768 && up < 32768);
+        assert_eq!(down - 32768, 32768 - up);
+        // a 45° slope facing the light is the brightest, facing away the darkest
+        assert_eq!(edge_light(1000, 0).max(edge_light(45, 0)), edge_light(45, 0));
+        assert_eq!(edge_light(-1000, 0), 0x1555);
+    }
+
+    #[test]
+    fn light_levels_dither_quarters() {
+        // 32768 is 16 sixteenths everywhere
+        assert!([(0, 0), (1, 0), (0, 1), (1, 1)].iter().all(|&(x, y)| light_level(32768, x, y) == 16));
+        // half a step up: every other pixel of a checkerboard gets one more
+        let half = 32768 + 1024;
+        let levels: Vec<i32> = [(0, 0), (1, 0), (0, 1), (1, 1)].iter().map(|&(x, y)| light_level(half, x, y)).collect();
+        assert_eq!(levels, [16, 17, 17, 16]);
     }
 }
