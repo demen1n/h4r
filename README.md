@@ -4,6 +4,8 @@
 
 English · [Русский](README.ru.md)
 
+[![CI](https://github.com/demen1n/h4r/actions/workflows/ci.yml/badge.svg)](https://github.com/demen1n/h4r/actions/workflows/ci.yml)
+
 h4r aims to run the original Heroes IV and its expansions on macOS, Linux, and Windows without Wine. The approach is similar to OpenMW: the engine reads the data from a copy of the original game that you own. Game assets are not included or distributed with this project.
 
 The goal is to preserve the original rules and appearance. Convenience features and intentional changes to the original behavior belong behind separate options.
@@ -175,7 +177,6 @@ The [GitHub Actions workflow](.github/workflows/ci.yml) builds all workspace tar
 and runs tests on macOS, Linux, and Windows with Rust 1.99.1 and `--locked`.
 CI explicitly points `H4_DATA` at a nonexistent directory and shows skip messages
 in the test log. It does not launch graphics windows or verify original game data.
-Cross-platform CI results will be available after the workflow first runs on GitHub.
 
 ```sh
 cargo test --workspace
