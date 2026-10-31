@@ -12,3 +12,5 @@
 # Local macOS captures; keep other project images eligible for version control.
 /Screenshot *.png
 /Screen Recording *.mov
+# Personal Claude Code notes: local install paths and environment.
+/CLAUDE.local.md
