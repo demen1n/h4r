@@ -61,8 +61,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let modulus = modulus.parse()?;
                 let mut rng = CombatRandom::new(seed.parse()?, modulus);
                 let mut result = Vec::new();
-                for roll in rolls.chunks_exact(3) {
-                    let (a, b, purpose) = (roll[0].parse()?, roll[1].parse()?, roll[2].parse()?);
+                // The rolls come in triples (first id, second id, purpose).
+                for [a, b, purpose] in rolls.as_chunks::<3>().0 {
+                    let (a, b, purpose) = (a.parse()?, b.parse()?, purpose.parse()?);
                     if purpose == RESEED_MARKER {
                         rng = CombatRandom::new(a, modulus);
                     } else {

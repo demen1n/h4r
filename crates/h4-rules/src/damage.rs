@@ -265,6 +265,9 @@ pub fn damage_modifier(attacker: &Attacker, defender: &Defender) -> f32 {
 }
 
 // x87 precision is set to 53 bits by the original CRT (RVA 4f2ee8).
+// Clippy dislikes `!(ratio >= 0.05)`, but `ratio < 0.05` would be wrong here: for "not a
+// number" both comparisons are false, and the game takes the lower bound in that case.
+#[allow(clippy::neg_cmp_op_on_partial_ord)]
 fn damage_modifier_precise(attacker: &Attacker, defender: &Defender) -> f64 {
     let mut offense = attacker.offense;
     let mut bonus = defender.defense_bonus;

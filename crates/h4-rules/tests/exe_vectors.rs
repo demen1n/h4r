@@ -34,13 +34,14 @@ fn combat_rng_matches_original_vectors() {
         let (seed, modulus) = (input[0], input[1]);
         let mut rng = CombatRandom::new(seed, modulus);
         let mut got = Vec::new();
-        for roll in input[2..].chunks_exact(3) {
+        // The rolls come in triples (first id, second id, purpose).
+        for &[first, second, purpose] in input[2..].as_chunks::<3>().0 {
             // Purpose 44 is the bench's "reseed" marker, not a real roll
             // (see `RESEED_MARKER` in examples/exe_reference.rs).
-            if roll[2] == 44 {
-                rng = CombatRandom::new(roll[0], modulus);
+            if purpose == 44 {
+                rng = CombatRandom::new(first, modulus);
             } else {
-                got.push(rng.roll(roll[0], roll[1], roll[2]));
+                got.push(rng.roll(first, second, purpose));
             }
         }
         assert_eq!(got, expected, "{request}");
