@@ -4,14 +4,46 @@
 
 use crate::damage::ability;
 
+/// Effect ids read from the exe keyword pairs at VA 0x994ac0.
+/// These are spell/effect ids, a different namespace from creature abilities.
+pub mod effect {
+    pub const ANTI_MAGIC: u8 = 0x03;
+    pub const BLIND: u8 = 0x0b;
+    pub const COLD_RESISTANCE: u8 = 0x14;
+    pub const FIRE_RESISTANCE: u8 = 0x28;
+    pub const SANCTUARY: u8 = 0x89;
+    pub const STONE_GAZE: u8 = 0x98;
+}
+
+/// Bits of an effect record's +0x3c word, named by their confirmed use here.
+/// Some bits participate in other filters too; these names are not a full flag enum.
+pub mod flag {
+    pub const AFFECTS_ELEMENTALS: u32 = 0x02;
+    pub const AFFECTS_MECHANICAL: u32 = 0x10;
+    pub const AFFECTS_UNDEAD: u32 = 0x20;
+    pub const COLD: u32 = 0x0400;
+    /// Includes the full-resistance gate even without RESISTIBLE. Its wider meaning
+    /// is unresolved (it also participates in the caster-effect-0x90 filter).
+    pub const CHECK_FULL_RESISTANCE: u32 = 0x2000;
+    pub const BLOCKED_BY_BERSERK: u32 = 0x4000;
+    pub const FIRE: u32 = 0x8000;
+    /// Enables the caster's negate_mind_immunity exception to target-kind checks.
+    pub const NEGATE_MIND_IMMUNITY_APPLIES: u32 = 0x200000;
+    pub const RESISTIBLE: u32 = 0x800000;
+    pub const RESISTIBLE_BETWEEN_SIDES: u32 = 0x1000000;
+}
+
 /// Inputs supplied by the effect record and combat participants.
 #[derive(Debug, Clone, Copy)]
 pub struct Effectiveness {
+    /// All target-eligibility checks passed, including filters outside this module.
+    /// A rejected effect must stay at zero even if the caster ignores resistance.
     pub eligible: bool,
-    /// Effect record flag 0x800000.
+    /// Whether the record has [`flag::RESISTIBLE`].
     pub resisted: bool,
-    /// Effect record flag 0x1000000: resistance applies between different sides.
+    /// Whether the record has [`flag::RESISTIBLE_BETWEEN_SIDES`].
     pub resisted_between_sides: bool,
+    /// Equality of the two side ids, not friendliness or alliance.
     pub same_side: bool,
     /// Attacker [`ability::IGNORE_MAGIC_RESISTANCE`], checked before ignore wards.
     pub bypass_resistance: bool,
@@ -29,7 +61,7 @@ impl Effectiveness {
         if !self.eligible {
             return 0;
         }
-        if !(self.resisted || self.resisted_between_sides && !self.same_side)
+        if !(self.resisted || (self.resisted_between_sides && !self.same_side))
             || self.bypass_resistance
         {
             return 100;
@@ -59,35 +91,39 @@ impl ImmunityFilters<'_> {
     /// General ability/effect immunities (1b3540).
     pub fn allows_general(self) -> bool {
         let has_ability = |id| self.target_abilities.contains(&id);
-        let effect = |id| self.target_effects.contains(&id);
+        let has_effect = |id| self.target_effects.contains(&id);
+        // Vulnerability bypasses these immunities, but not every eligibility filter.
         if has_ability(ability::SPELL_VULNERABILITY) {
             return true;
         }
         !(has_ability(ability::MAGIC_IMMUNITY)
-            || effect(0x89)
-            || effect(0x03)
-            || self.flags & 0x8000 != 0 && (effect(0x28) || has_ability(ability::FIRE_RESISTANCE))
-            || self.flags & 0x0400 != 0 && (effect(0x14) || has_ability(ability::COLD_RESISTANCE))
-            || self.flags & 0x4000 != 0 && has_ability(ability::BERSERK))
+            || has_effect(effect::SANCTUARY)
+            || has_effect(effect::ANTI_MAGIC)
+            || ((self.flags & flag::FIRE != 0)
+                && (has_effect(effect::FIRE_RESISTANCE) || has_ability(ability::FIRE_RESISTANCE)))
+            || ((self.flags & flag::COLD != 0)
+                && (has_effect(effect::COLD_RESISTANCE) || has_ability(ability::COLD_RESISTANCE)))
+            || ((self.flags & flag::BLOCKED_BY_BERSERK != 0) && has_ability(ability::BERSERK)))
     }
 
     /// Target-kind immunities and the caster's negate-mind-immunity exception (1b3a10).
     pub fn allows_target_kind(self) -> bool {
         let has_ability = |id| self.target_abilities.contains(&id);
         if has_ability(ability::SPELL_VULNERABILITY)
-            || self.flags & 0x200000 != 0
+            || ((self.flags & flag::NEGATE_MIND_IMMUNITY_APPLIES != 0)
                 && self
                     .caster_abilities
-                    .is_some_and(|a| a.contains(&ability::NEGATE_MIND_IMMUNITY))
+                    .is_some_and(|a| a.contains(&ability::NEGATE_MIND_IMMUNITY)))
         {
             return true;
         }
-        !(self.flags & 0x10 == 0 && has_ability(ability::MECHANICAL)
-            || self.flags & 0x20 == 0 && has_ability(ability::UNDEAD)
-            || self.flags & 0x02 == 0 && has_ability(ability::ELEMENTAL))
+        !(((self.flags & flag::AFFECTS_MECHANICAL == 0) && has_ability(ability::MECHANICAL))
+            || ((self.flags & flag::AFFECTS_UNDEAD == 0) && has_ability(ability::UNDEAD))
+            || ((self.flags & flag::AFFECTS_ELEMENTALS == 0) && has_ability(ability::ELEMENTAL)))
     }
 
-    /// The effect-0x98 branch of 1b4770 (also shared by effect 0x0b).
+    /// The stone-gaze branch of 1b4770 (also shared by the blind spell).
+    /// Blind targets cannot be affected by the gaze, unless they have spell vulnerability.
     pub fn allows_effect_98(self) -> bool {
         !self.target_abilities.contains(&ability::BLIND)
             || self
@@ -101,7 +137,9 @@ impl ImmunityFilters<'_> {
 #[derive(Debug, Clone, Copy)]
 pub struct ResistanceGate<'a> {
     pub immunities: ImmunityFilters<'a>,
+    /// Result of the combat hostility predicate; may differ from side-id inequality.
     pub hostile: bool,
+    /// Equality of the two side ids, not friendliness or alliance.
     pub same_side: bool,
     /// Target virtual slot +0x7c(effect id), including all of its bonuses.
     pub resistance: i32,
@@ -110,19 +148,22 @@ pub struct ResistanceGate<'a> {
 impl ResistanceGate<'_> {
     pub fn allows(self) -> bool {
         let input = self.immunities;
-        if input.caster_abilities.is_some() && !self.hostile
+        // Non-hostile targets are exempt here; immunity filters still apply separately.
+        if (input.caster_abilities.is_some() && !self.hostile)
             || input
                 .target_abilities
                 .contains(&ability::SPELL_VULNERABILITY)
-            || input
+            || (input
                 .caster_abilities
                 .is_some_and(|a| a.contains(&ability::IGNORE_MAGIC_RESISTANCE))
-                && !input.target_abilities.contains(&ability::MAGIC_IMMUNITY)
+                && !input.target_abilities.contains(&ability::MAGIC_IMMUNITY))
         {
             return true;
         }
-        let applies = input.flags & (0x800000 | 0x2000) != 0
-            || input.flags & 0x1000000 != 0 && input.caster_abilities.is_some() && !self.same_side;
+        let applies = (input.flags & (flag::RESISTIBLE | flag::CHECK_FULL_RESISTANCE) != 0)
+            || ((input.flags & flag::RESISTIBLE_BETWEEN_SIDES != 0)
+                && input.caster_abilities.is_some()
+                && !self.same_side);
         !applies || self.resistance < 100
     }
 }

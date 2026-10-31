@@ -1,3 +1,7 @@
+//! Shared adapter for independent immunity-filter requests and original-answer tests.
+//! Fields: flags, caster ability ids ("none" = no caster, "-" = no abilities),
+//! target ability ids, active effect ids, hostility, side equality, target resistance.
+//! Keeping the adapter shared ensures CI checks the same inputs as the exe bench.
 use h4_rules::effects::{ImmunityFilters, ResistanceGate};
 
 pub fn evaluate(fields: &[&str]) -> Result<String, Box<dyn std::error::Error>> {
