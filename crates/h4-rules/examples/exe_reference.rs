@@ -3,7 +3,8 @@
 //! The bench sends one request per line on stdin and reads one answer line per request
 //! from stdout; it asks the original x86 code the same question and compares the two
 //! answers. Requests are space-separated: a kind (`global`, `combat`, `dice`, `ability42`,
-//! `attack`, `modify`, `ratio`, `final`) and its numbers. No game data is needed.
+//! `attack`, `modify`, `ratio`, `final`, `effectiveness`, `immunity`) and its numbers.
+//! No game data is needed.
 //!
 //! The same parsing helpers (`support/*.rs`) are reused by the golden-vector tests in
 //! `tests/`, so a stored original answer is checked through exactly this code path.

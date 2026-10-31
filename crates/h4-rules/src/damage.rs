@@ -21,8 +21,10 @@
 
 use crate::random::CombatRandom;
 
-/// Ability numbers the damage code checks. The names are the game's keywords.
+/// Ability numbers the damage and effect rules check. The names are the game's keywords.
 pub mod ability {
+    pub const BERSERK: u8 = 0x03;
+    pub const BLIND: u8 = 0x05;
     pub const BLOCK: u8 = 0x07;
     pub const BREATH_ATTACK: u8 = 0x09;
     /// Checked on the target as a ward against the Chaos school.
@@ -36,9 +38,13 @@ pub mod ability {
     pub const FIRE_RESISTANCE: u8 = 0x15;
     /// Doubles damage against "giant" targets in melee and at range.
     pub const GIANTSLAYER: u8 = 0x1c;
+    pub const IGNORE_WARDS: u8 = 0x1f;
     pub const LIFE_PROTECTION: u8 = 0x22;
+    pub const MAGIC_IMMUNITY: u8 = 0x26;
     /// Doubles damage against "giant" targets in melee.
     pub const MELEE_GIANTSLAYER: u8 = 0x2b;
+    pub const NEGATE_MIND_IMMUNITY: u8 = 0x2d;
+    pub const SPELL_VULNERABILITY: u8 = 0x3f;
     /// Medusa's stone gaze: extra damage based on the target's hit points, after the
     /// checks of effect 0x98 (the spell `stone_gaze`: may it touch this target, how much of
     /// it is resisted). See [`super::finalize_attack_damage`].
@@ -53,6 +59,7 @@ pub mod ability {
     // "does not work on undead, mechanical creatures and elementals".
     pub const RANGED: u8 = 0x33;
     pub const RANGED_GIANTSLAYER: u8 = 0x35;
+    pub const IGNORE_MAGIC_RESISTANCE: u8 = 0x52;
     pub const LARGE_AREA_EFFECT: u8 = 0x53;
     pub const ARC_BREATH_ATTACK: u8 = 0x54;
 }

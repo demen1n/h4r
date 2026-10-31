@@ -2,6 +2,8 @@
 //! This is a partial eligibility pipeline: effect records, side/refresh/artifact
 //! filters and the target resistance accessor are not yet connected to combat.
 
+use crate::damage::ability;
+
 /// Inputs supplied by the effect record and combat participants.
 #[derive(Debug, Clone, Copy)]
 pub struct Effectiveness {
@@ -11,9 +13,9 @@ pub struct Effectiveness {
     /// Effect record flag 0x1000000: resistance applies between different sides.
     pub resisted_between_sides: bool,
     pub same_side: bool,
-    /// Attacker ability 0x52, checked before 0x1f.
+    /// Attacker [`ability::IGNORE_MAGIC_RESISTANCE`], checked before ignore wards.
     pub bypass_resistance: bool,
-    /// Attacker ability 0x1f: query resistance with effect id -1.
+    /// Attacker [`ability::IGNORE_WARDS`]: query resistance with effect id -1.
     pub generic_resistance_only: bool,
     /// Target virtual slot +0x7c(effect id).
     pub effect_resistance: i32,
@@ -56,36 +58,41 @@ pub struct ImmunityFilters<'a> {
 impl ImmunityFilters<'_> {
     /// General ability/effect immunities (1b3540).
     pub fn allows_general(self) -> bool {
-        let ability = |id| self.target_abilities.contains(&id);
+        let has_ability = |id| self.target_abilities.contains(&id);
         let effect = |id| self.target_effects.contains(&id);
-        if ability(0x3f) {
+        if has_ability(ability::SPELL_VULNERABILITY) {
             return true;
         }
-        !(ability(0x26)
+        !(has_ability(ability::MAGIC_IMMUNITY)
             || effect(0x89)
             || effect(0x03)
-            || self.flags & 0x8000 != 0 && (effect(0x28) || ability(0x15))
-            || self.flags & 0x0400 != 0 && (effect(0x14) || ability(0x0d))
-            || self.flags & 0x4000 != 0 && ability(0x03))
+            || self.flags & 0x8000 != 0 && (effect(0x28) || has_ability(ability::FIRE_RESISTANCE))
+            || self.flags & 0x0400 != 0 && (effect(0x14) || has_ability(ability::COLD_RESISTANCE))
+            || self.flags & 0x4000 != 0 && has_ability(ability::BERSERK))
     }
 
-    /// Target-kind immunities and the caster's 0x2d exception (1b3a10).
+    /// Target-kind immunities and the caster's negate-mind-immunity exception (1b3a10).
     pub fn allows_target_kind(self) -> bool {
-        let ability = |id| self.target_abilities.contains(&id);
-        if ability(0x3f)
+        let has_ability = |id| self.target_abilities.contains(&id);
+        if has_ability(ability::SPELL_VULNERABILITY)
             || self.flags & 0x200000 != 0
-                && self.caster_abilities.is_some_and(|a| a.contains(&0x2d))
+                && self
+                    .caster_abilities
+                    .is_some_and(|a| a.contains(&ability::NEGATE_MIND_IMMUNITY))
         {
             return true;
         }
-        !(self.flags & 0x10 == 0 && ability(0x2a)
-            || self.flags & 0x20 == 0 && ability(0x4d)
-            || self.flags & 0x02 == 0 && ability(0x11))
+        !(self.flags & 0x10 == 0 && has_ability(ability::MECHANICAL)
+            || self.flags & 0x20 == 0 && has_ability(ability::UNDEAD)
+            || self.flags & 0x02 == 0 && has_ability(ability::ELEMENTAL))
     }
 
     /// The effect-0x98 branch of 1b4770 (also shared by effect 0x0b).
     pub fn allows_effect_98(self) -> bool {
-        !self.target_abilities.contains(&0x05) || self.target_abilities.contains(&0x3f)
+        !self.target_abilities.contains(&ability::BLIND)
+            || self
+                .target_abilities
+                .contains(&ability::SPELL_VULNERABILITY)
     }
 }
 
@@ -104,9 +111,13 @@ impl ResistanceGate<'_> {
     pub fn allows(self) -> bool {
         let input = self.immunities;
         if input.caster_abilities.is_some() && !self.hostile
-            || input.target_abilities.contains(&0x3f)
-            || input.caster_abilities.is_some_and(|a| a.contains(&0x52))
-                && !input.target_abilities.contains(&0x26)
+            || input
+                .target_abilities
+                .contains(&ability::SPELL_VULNERABILITY)
+            || input
+                .caster_abilities
+                .is_some_and(|a| a.contains(&ability::IGNORE_MAGIC_RESISTANCE))
+                && !input.target_abilities.contains(&ability::MAGIC_IMMUNITY)
         {
             return true;
         }
