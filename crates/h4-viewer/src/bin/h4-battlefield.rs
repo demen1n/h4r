@@ -1,0 +1,202 @@
+//! Inspect preset backdrops and combat scenery; this is not a playable battle.
+use h4_formats::archive::{data_dir, Resources};
+use h4_formats::battlefield::BattlefieldPreset;
+use h4_formats::combat_object::CombatObject;
+use h4_formats::sprite::Rect;
+use macroquad::prelude::*;
+
+struct Backdrop {
+    texture: Texture2D,
+    area: Rect,
+}
+struct Scenery {
+    frames: Vec<Texture2D>,
+    area: Rect,
+    offset: Vec2,
+    fps: f32,
+    details: String,
+}
+fn texture(width: i32, height: i32, rgba: &[u8]) -> Result<Texture2D, String> {
+    let w = u16::try_from(width).map_err(|_| "invalid image width")?;
+    let h = u16::try_from(height).map_err(|_| "invalid image height")?;
+    if w == 0 || h == 0 {
+        return Err("empty image".into());
+    }
+    let t = Texture2D::from_rgba8(w, h, rgba);
+    t.set_filter(FilterMode::Nearest);
+    Ok(t)
+}
+fn backdrop(res: &Resources, name: &str) -> Result<Vec<Backdrop>, String> {
+    let model = res
+        .read(name)
+        .and_then(|b| BattlefieldPreset::read(&b))
+        .map_err(|e| e.to_string())?;
+    model
+        .layers
+        .iter()
+        .filter(|l| !l.is_empty())
+        .map(|l| {
+            Ok(Backdrop {
+                texture: texture(l.rect.width(), l.rect.height(), &l.to_rgba())?,
+                area: l.rect,
+            })
+        })
+        .collect()
+}
+fn scenery(res: &Resources, name: &str, shadow: bool) -> Result<Scenery, String> {
+    let model = res
+        .read(name)
+        .and_then(|b| CombatObject::read(&b))
+        .map_err(|e| e.to_string())?;
+    let area = model.image.bounds().ok_or("empty object image")?;
+    let frames = (0..model.image.frames.len().max(1))
+        .map(|i| texture(area.width(), area.height(), &model.image.compose(i, area, shadow)))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Scenery {
+        frames,
+        area,
+        offset: vec2(model.image.offset.0 as f32, model.image.offset.1 as f32),
+        fps: f32::from(model.frames_per_second.max(1)),
+        details: format!(
+            "type {} / {}, properties {:?}",
+            model.type_id, model.type_name, model.properties
+        ),
+    })
+}
+fn names(res: &Resources, prefix: &str) -> Vec<String> {
+    let mut names: Vec<_> = res
+        .names()
+        .filter(|n| n.to_lowercase().starts_with(prefix))
+        .map(str::to_owned)
+        .collect();
+    names.sort();
+    names
+}
+fn config() -> Conf {
+    Conf {
+        window_title: "Heroes IV — battlefield resource viewer".into(),
+        window_width: 1180,
+        window_height: 900,
+        ..Default::default()
+    }
+}
+#[macroquad::main(config)]
+async fn main() {
+    let res = match Resources::open(data_dir(std::env::args().nth(1))) {
+        Ok(res) => res,
+        Err(e) => {
+            eprintln!("{e}");
+            return;
+        }
+    };
+    let fields = names(&res, "battlefield_preset_map.");
+    let objects = names(&res, "combat_object.");
+    if fields.is_empty() || objects.is_empty() {
+        eprintln!("no battlefield or scenery resources");
+        return;
+    }
+    let (mut field, mut object) = (0, 0);
+    let mut shadow = true;
+    let mut background = backdrop(&res, &fields[field]);
+    let mut item = scenery(&res, &objects[object], shadow);
+    let mut anchor = vec2(590., 512.);
+    let mut paused = false;
+    let mut elapsed = 0.;
+    let mut ticks = 0;
+    loop {
+        if is_key_pressed(KeyCode::Escape) {
+            break;
+        }
+        let mut reload_field = false;
+        let mut reload_item = false;
+        for (key, delta) in [(KeyCode::Right, 1), (KeyCode::Left, -1)] {
+            if is_key_pressed(key) {
+                field = (field as isize + delta).rem_euclid(fields.len() as isize) as usize;
+                reload_field = true;
+            }
+        }
+        for (key, delta) in [(KeyCode::Down, 1), (KeyCode::Up, -1)] {
+            if is_key_pressed(key) {
+                object = (object as isize + delta).rem_euclid(objects.len() as isize) as usize;
+                reload_item = true;
+            }
+        }
+        if is_key_pressed(KeyCode::S) {
+            shadow = !shadow;
+            reload_item = true;
+        }
+        if is_key_pressed(KeyCode::Space) {
+            paused = !paused;
+        }
+        if reload_field {
+            background = backdrop(&res, &fields[field]);
+        }
+        if reload_item {
+            item = scenery(&res, &objects[object], shadow);
+            elapsed = 0.;
+        }
+        if !paused {
+            elapsed += get_frame_time();
+        }
+        let scale = (screen_width() / 1180.).min((screen_height() - 110.) / 1024.);
+        let origin = vec2((screen_width() - 1180. * scale) / 2., 110.);
+        if is_mouse_button_pressed(MouseButton::Left) {
+            let mouse = mouse_position();
+            anchor = (vec2(mouse.0, mouse.1) - origin) / scale;
+        }
+        clear_background(Color::from_rgba(36, 39, 43, 255));
+        if let Ok(layers) = &background {
+            for l in layers {
+                draw_texture_ex(
+                    &l.texture,
+                    origin.x + l.area.left as f32 * scale,
+                    origin.y + l.area.top as f32 * scale,
+                    WHITE,
+                    DrawTextureParams {
+                        dest_size: Some(vec2(l.area.width() as f32, l.area.height() as f32) * scale),
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+        if let Ok(item) = &item {
+            let index = (elapsed * item.fps) as usize % item.frames.len();
+            let pos = origin + (anchor + item.offset + vec2(item.area.left as f32, item.area.top as f32)) * scale;
+            draw_texture_ex(
+                &item.frames[index],
+                pos.x,
+                pos.y,
+                WHITE,
+                DrawTextureParams {
+                    dest_size: Some(vec2(item.area.width() as f32, item.area.height() as f32) * scale),
+                    ..Default::default()
+                },
+            );
+        }
+        let point = origin + anchor * scale;
+        draw_line(point.x - 5., point.y, point.x + 5., point.y, 1., YELLOW);
+        draw_line(point.x, point.y - 5., point.x, point.y + 5., 1., YELLOW);
+        for (i, text) in [
+            fields[field].clone(),
+            objects[object].clone(),
+            item.as_ref().map(|s| s.details.clone()).unwrap_or_else(|e| e.clone()),
+            "Left/Right field | Up/Down object | click place | Space pause | S shadow | Esc exit".into(),
+        ]
+        .iter()
+        .enumerate()
+        {
+            draw_text(text, 10., 22. + i as f32 * 24., 19., WHITE);
+        }
+        if let Err(e) = &background {
+            draw_text(e, 10., 135., 20., RED);
+        }
+        ticks += 1;
+        if ticks == 3 {
+            if let Ok(path) = std::env::var("H4_SCREENSHOT") {
+                get_screen_data().export_png(&path);
+                break;
+            }
+        }
+        next_frame().await;
+    }
+}

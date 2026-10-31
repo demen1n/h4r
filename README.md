@@ -153,6 +153,14 @@ Optional environment variables:
 | `H4_SCREENSHOT=out.png` | Capture a rendered frame and exit; requires a graphics environment |
 | `H4_ORDERS="10,30;end;tab"` | Execute scripted movement and turn commands; useful with screenshots |
 
+### Battlefield resource viewer
+
+```sh
+cargo run --release -p h4-viewer --bin h4-battlefield -- "/path/to/Heroes IV/data"
+```
+
+Left/right selects a backdrop, up/down selects scenery, and clicking places its anchor (yellow cross). `Space` pauses animation, `S` toggles shadows, and `Esc` exits. Rendering preserves layer coordinates and the stored animation offset. `H4_SCREENSHOT=out.png` captures a frame and exits. This inspects resources; battle rules, automatic placement, and cell blocking are not implemented here.
+
 ### Animation viewer
 
 ```sh
