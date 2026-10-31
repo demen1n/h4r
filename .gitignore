@@ -7,3 +7,8 @@
 /.claude/worktrees
 # Local reverse-engineering output; keep research notes in version control.
 /decomp/*.c
+# Finder metadata at any directory depth.
+.DS_Store
+# Local macOS captures; keep other project images eligible for version control.
+/Screenshot *.png
+/Screen Recording *.mov
