@@ -10,6 +10,8 @@ The goal is to preserve the original rules and appearance. Convenience features 
 
 **This is an early development prototype. It cannot play a complete game yet.**
 
+**Help is welcome.** Code review, reverse engineering, testing, documentation, and knowledge of Heroes IV all help move the project forward. See [Contributing](#contributing).
+
 ## Why
 
 This started with a simple wish: I wanted to play Heroes IV on my Apple Silicon Mac. Under Wine and Rosetta 2, the game would freeze for one or two seconds whenever a new music track started, for example when a hero crossed onto another terrain type or visited a building.
@@ -21,6 +23,12 @@ With help from an AI coding agent, I wrote a drop-in replacement for `Mp3dec.asi
 That work lives in a separate repository: **[h4-mp3dec-fast](https://github.com/demen1n/h4-mp3dec-fast)**, with the replacement plugin, measurements, and installation instructions. It fixes the original game under Wine; h4r takes the next step toward a native engine.
 
 The long-term goal is a maintainable, open-source engine that keeps the game playable across platforms while using the player's existing game installation.
+
+## Development with AI
+
+I started this project with little programming experience and am learning Rust as I go. Much of the initial foundation was built with substantial help from AI coding agents: investigating the original engine, understanding file formats, writing the Rust implementation, tests, and documentation. An engine of this size would have been far beyond what I could investigate and implement quickly on my own. AI assistance made it possible to get started and reach a working prototype.
+
+The project still needs experienced eyes. Independent review of the code and research, comparisons with the original game, and corrections to mistaken assumptions are especially welcome. Research notes record the evidence behind recovered behavior and the parts that still need verification.
 
 ## Current state
 
@@ -138,6 +146,12 @@ cargo run --release -p h4-viewer --bin h4-dump -- \
 
 ## Tests
 
+The [GitHub Actions workflow](.github/workflows/ci.yml) builds all workspace targets
+and runs tests on macOS, Linux, and Windows with Rust 1.99.1 and `--locked`.
+CI explicitly points `H4_DATA` at a nonexistent directory and shows skip messages
+in the test log. It does not launch graphics windows or verify original game data.
+Cross-platform CI results will be available after the workflow first runs on GitHub.
+
 ```sh
 cargo test --workspace
 ```
@@ -171,11 +185,21 @@ Further documentation is currently mostly in Russian:
 - [Research notes](decomp/) — descriptions of recovered formats and algorithms.
 - [Development context](CLAUDE.md) — local setup and detailed implementation notes.
 
-## Contributing and licensing
+## Contributing
 
-The project is still establishing its foundations. Useful contributions include reproducible bug reports, format research, comparisons with the original game, platform testing, and small changes backed by evidence. Please discuss substantial changes first.
+If you care about Heroes IV and want to help keep it playable, you are welcome here. You do not need to be a Rust developer to contribute.
+
+- **Code and review:** improve the implementation, investigate bugs, or review existing readers and rules.
+- **Reverse engineering:** document a format or mechanic, or verify an existing interpretation.
+- **Testing:** try the prototype on another platform, edition, or localization and report reproducible problems.
+- **Game knowledge:** describe how a mechanic behaves in the original, with steps to reproduce it.
+- **Documentation and translation:** make the setup instructions and research easier to follow in English or Russian.
+
+Open an issue with a finding or an idea, or send a small pull request. English and Russian are both welcome. Please discuss substantial changes first so we can agree on the scope and how to check the result.
 
 Do not submit original game assets, executables, or decompiler output. Tests should use synthetic data or read game files from a local installation.
+
+## License
 
 h4r's original source code and documentation are licensed under the **GNU General Public License, version 3 only** (`GPL-3.0-only`). See [LICENSE](LICENSE) for the full text and [LICENSING.md](LICENSING.md) for scope and provenance notes.
 

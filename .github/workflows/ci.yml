@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: "1"
+      RUST_TOOLCHAIN: "1.99.1"
+
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install the development Rust toolchain
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --no-self-update
+
+      - name: Declare test scope
+        run: |
+          # Override the developer's fallback; CI must not read original game data.
+          game_data="$RUNNER_TEMP/h4r-ci-no-game-data"
+          test ! -e "$game_data"
+          printf 'H4_DATA=%s\n' "$game_data" >> "$GITHUB_ENV"
+          echo "Original game data is absent. Resource-dependent tests will print skip messages."
+          echo "This job checks compilation and tests without game data; it does not verify original-resource compatibility or graphical startup." >> "$GITHUB_STEP_SUMMARY"
+          echo "Resource-dependent tests return early and Cargo reports them as passed. See skipped: messages in the test log." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build all workspace targets
+        run: cargo "+$RUST_TOOLCHAIN" build --workspace --all-targets --locked
+
+      - name: Run tests with skip messages visible
+        run: cargo "+$RUST_TOOLCHAIN" test --workspace --locked -- --nocapture
