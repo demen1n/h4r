@@ -213,6 +213,11 @@ impl ActorSequence {
     pub(crate) fn read_from(r: &mut Reader) -> Result<ActorSequence> {
         // outer u16: 2 in actor_sequence files, 1 inside adventure objects; layout is the same
         r.u16()?;
+        Self::read_image_from(r)
+    }
+
+    /// Image sequence without a resource wrapper, embedded in combat objects.
+    pub(crate) fn read_image_from(r: &mut Reader) -> Result<ActorSequence> {
         let version = r.u16()?;
         match version {
             0..=2 => {}

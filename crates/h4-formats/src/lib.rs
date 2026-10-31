@@ -18,6 +18,7 @@ pub mod archive;
 pub mod battlefield;
 pub mod catalog;
 pub mod combat_actor;
+pub mod combat_object;
 pub mod cp1251;
 pub mod map;
 pub mod map_army;
