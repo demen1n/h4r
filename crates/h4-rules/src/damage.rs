@@ -211,9 +211,11 @@ pub fn modify_damage(
     }
 
     // Attack against defense: the heart of the formula.
-    let ratio = damage_modifier(attacker, defender);
-    damage = (ratio as f64 * damage as f64) as i32;
-    log.push(DamageEvent::AttackVsDefense { ratio, damage });
+    // The original keeps ST(0) at CRT-selected 53-bit precision between the
+    // coefficient call and __ftol; an intermediate f32 loses whole damage points.
+    let ratio = damage_modifier_precise(attacker, defender);
+    damage = (ratio * damage as f64) as i32;
+    log.push(DamageEvent::AttackVsDefense { ratio: ratio as f32, damage });
 
     // Ward against the attacker's school: damage * 100 / 150, i.e. a third less.
     if is_warded(attacker.school, defender) {
@@ -248,6 +250,11 @@ pub fn modify_damage(
 /// simply ignored (but a bonus below 1, a penalty, stays). This is a literal translation of
 /// the branches in the exe; the reading of what it means is ours.
 pub fn damage_modifier(attacker: &Attacker, defender: &Defender) -> f32 {
+    damage_modifier_precise(attacker, defender) as f32
+}
+
+// x87 precision is set to 53 bits by the original CRT (RVA 4f2ee8).
+fn damage_modifier_precise(attacker: &Attacker, defender: &Defender) -> f64 {
     let mut offense = attacker.offense;
     let mut bonus = defender.defense_bonus;
     if attacker.defense_reduction <= bonus {
@@ -255,12 +262,13 @@ pub fn damage_modifier(attacker: &Attacker, defender: &Defender) -> f32 {
     } else if bonus > 1.0 {
         bonus = 1.0;
     }
-    // x87 keeps the denominator and division extended until returning f32.
-    let ratio = (offense as f64 / (defender.defense_basic as f64 * bonus as f64)) as f32;
+    // The adjusted numerator is explicitly stored to f32 in the original.
+    // The denominator and division remain at 53-bit precision.
+    let ratio = offense as f64 / (defender.defense_basic as f64 * bonus as f64);
     // Not `f32::clamp`: like the game, check the lower bound first and treat "not a number"
     // (0 / 0) as below it, so the result is always a usable number.
-    if !(ratio >= 0.05) {
-        0.05
+    if !(ratio >= 0.05_f32 as f64) {
+        0.05_f32 as f64
     } else if ratio > 20.0 {
         20.0
     } else {
@@ -384,6 +392,16 @@ mod tests {
         assert_eq!(damage_modifier(&a, &d).to_bits(), 0x3f2aaaab);
         a.defense_reduction = 0.5;
         assert_eq!(damage_modifier(&a, &d).to_bits(), 0x3eaaaaab);
+    }
+
+    #[test]
+    fn scaling_keeps_the_coefficient_at_crt_precision() {
+        let mut a = orc();
+        let mut d = target();
+        a.offense = 5.0;
+        d.defense_basic = 6.0;
+        // Original RVA 1edf30: prematurely storing 5/6 to f32 gives 4, not 5.
+        assert_eq!(modify(6, &a, &d), 5);
     }
 
     #[test]

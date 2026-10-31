@@ -1,4 +1,6 @@
-//! Line protocol used by tools/testbench/compare.py; no original game data required.
+#[path = "support/modifier_case.rs"]
+mod modifier_case;
+// Line protocol used by tools/testbench/compare.py; no original game data required.
 use h4_rules::{
     damage::*,
     random::{CombatRandom, GlobalRandom},
@@ -66,6 +68,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 result.push(rng.roll(target, a.id, 0).to_string());
                 println!("{}", result.join(" "));
             }
+            ["modify", fields @ ..] => println!("{}", modifier_case::evaluate(fields)?),
             ["ratio", offense, reduction, defense, bonus] => {
                 a.offense = offense.parse()?;
                 a.defense_reduction = reduction.parse()?;

@@ -15,8 +15,13 @@ The executable is identified by SHA-256 before any address is used. Other builds
 are rejected. No Windows loader, imports, game initialization or Wine is needed.
 On a restricted macOS sandbox Unicorn may abort during CPU/cache detection;
 run the command with the sandbox's normal execution approval.
+The harness executes the original CRT precision initializer (RVA `4f2ee8`) before
+calling game functions: x87 uses 53-bit precision, as selected at exe startup
+(`4ed10b` -> `4f2ee8` -> `4f8e99`). The FPU starts with reset control word `0x037f`; the CRT changes it to
+`0x023f` (53-bit precision, nearest rounding, masked exceptions), which is checked
+and recorded in the report. Skipping this initialization produces misleading differences.
 
-The deterministic corpus has 536 requests:
+The deterministic corpus has 1,857 requests:
 
 - 8 seeds × 256 consecutive global RNG outputs (RVA `36a70`), including unsigned
   overflow and the high bit; 2,048 individual numbers.
@@ -32,6 +37,12 @@ The deterministic corpus has 536 requests:
 - 48 damage dice sequences (RVA `1ee240`): two seeds, counts 0/1/5/9/10/11/19/1000,
   three damage ranges (including fixed damage), three consecutive hits and the
   next RNG number to verify consumption.
+
+- 1,321 full modifier cases (RVA `1edf30`): charging at movement thresholds,
+  melee/ranged giant slaying, effect `0x8c`, every luck multiplier and mode,
+  all schools and ward sources, fire/cold/area attacks, defense reduction,
+  clamps and zero damage, 625 integer-boundary cases and 128 deterministic
+  mixed-effect cases.
 
 Virtual accessors are tiny fixture stubs returning supplied values. The actual
 RNG, arithmetic, branches, limits and rounding execute from the original image.
@@ -51,12 +62,12 @@ observes the original dice sum before modifiers; it does not verify the modifier
 chain. Creature low/high damage and IDs are fixture values.
 
 The report defaults to `target/testbench-report.json`, records the executable
-hash and Unicorn version, and contains every mismatch with its input and both
-answers. It also stores the original answers for combat/dice sequences in
+hash, Unicorn version and x87 control word, and contains every mismatch with its input and both
+answers. It also stores the original answers for combat/dice/modifier cases in
 `vectors`. Differences cause exit status 1; unsupported images or execution errors
 also fail the command. `--report PATH` selects another destination.
 
-Verified on 31 October 2026: 536 requests, zero differences. The first run exposed
+Verified on 31 October 2026: 1,857 requests, zero differences. The first run exposed
 two one-ULP differences in the Rust damage coefficient: the original keeps the
 denominator in x87 precision. The fix has a normal Rust regression test.
 
@@ -68,6 +79,22 @@ All 64 original combat/dice vectors are stored in
 `crates/h4-rules/tests/exe_vectors.tsv`; two ordinary Rust tests verify them without
 Unicorn or game data, including reseeding and RNG consumption.
 
-Scope still to add: the full modifier chain (`1edf30`), ability `0x42`, and real creature/battlefield objects.
+The modifier fixture executes `1edf30`, its nested `250a60` coefficient, luck
+lookup (`17b8f0`) and the CRT float-to-integer conversion (`4ed234`) from the exe.
+Only virtual input accessors (stats, abilities, effects) are fixture stubs. In this
+mode the dice fixture's modifier interception is disabled.
+The coefficient must stay at 53-bit precision until scaled damage is truncated;
+rounding it to `f32` first caused 159 differences in this corpus (e.g. damage 6,
+attack 5, defense 6: 4 instead of the original 5). `damage_modifier` still returns
+`f32` for callers needing a stored coefficient; damage scaling uses the precise
+internal calculation. A minimal unit test and all 1,321 original answers in
+`tests/modifier_vectors.tsv` prevent regression.
+
+Use `--only modify` (or `global`, `combat`, `dice`, `ratio`, `final`) for a focused
+run; it applies the same CRT initialization. A focused report contains only those
+cases and replaces the selected report file.
+
+Scope still to add: finalization ability `0x42`, a connected full attack, and real
+creature/battlefield objects.
 This is a function-level bench, not a replay or proof that full battles match.
 The ordinary cross-platform CI does not require Unicorn or an original exe.

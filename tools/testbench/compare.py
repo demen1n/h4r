@@ -4,12 +4,13 @@ import argparse
 import hashlib
 import itertools
 import json
+import random
 from pathlib import Path
 import struct
 import subprocess
 
 from unicorn import Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_CODE
-from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_ECX, UC_X86_REG_ESP, UC_X86_REG_EIP
+from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_ECX, UC_X86_REG_ESP, UC_X86_REG_EIP, UC_X86_REG_FPCW
 
 ROOT = Path(__file__).resolve().parents[2]
 SHA256 = '175eacb4838c86e5aee03f31e2406004a06dd238933517e2df40669cf17d36ff'
@@ -52,6 +53,12 @@ class Original:
         self.uc.mem_write(STOP, b'\xd9\x1d' + struct.pack('<I', HEAP + 0xe000))  # fstp float
         self.uc.mem_write(HEAP, struct.pack('<I', HEAP + 0x1000))
         self.uc.mem_write(HEAP + 0x200, struct.pack('<I', HEAP + 0x1200))
+        # Start with reset/default exception masks, then execute CRT precision init.
+        # CRT startup -> 4ed10b -> 4f2ee8 selects 53-bit x87 precision.
+        self.uc.reg_write(UC_X86_REG_FPCW, 0x037f)
+        self.call(0x4f2ee8)
+        if self.uc.reg_read(UC_X86_REG_FPCW) != 0x023f:
+            raise RuntimeError(f'original CRT control word: {self.uc.reg_read(UC_X86_REG_FPCW):04x}')
 
     def read_word(self, address):
         return struct.unpack('<I', self.uc.mem_read(address, 4))[0]
@@ -77,7 +84,7 @@ class Original:
             uc.reg_write(UC_X86_REG_EAX, TARGET)
         elif address == 0x5edf30:
             if not self.dice_mode:
-                raise RuntimeError('unexpected modifier call outside dice fixture')
+                return  # execute the real modifier chain
             # Observe the base roll before modifiers; do not reproduce its formula.
             uc.reg_write(UC_X86_REG_EAX, self.read_word(sp + 4))
             pop = 20
@@ -107,6 +114,47 @@ class Original:
             self.uc.mem_write(address, b'\xb8' + struct.pack('<I', value) + b'\xc2' + struct.pack('<H', pop))
         self.uc.ctl_remove_cache(address, address + 32)
         return address
+
+    def lookup(self, slot, values):
+        """Virtual bool accessor backed only by fixture bytes, not game logic."""
+        table = HEAP + 0x8000 + slot * 256
+        self.uc.mem_write(table, bytes(256))
+        for value in values:
+            self.uc.mem_write(table + value, b'\x01')
+        address = HEAP + 0x3000 + slot * 32
+        self.uc.mem_write(address, b'\x8b\x44\x24\x04\x0f\xb6\x80' + struct.pack('<I', table) + b'\xc2\x04\x00')
+        self.uc.ctl_remove_cache(address, address + 32)
+        return address
+
+    def modify(self, v):
+        (base, offense, reduction, defense, bonus, school, abilities, resistances,
+         wards, giant, effect, ranged, moved, luck, strength) = v
+        abilities = [] if abilities == '-' else list(map(int, abilities.split(',')))
+        resistances = [] if resistances == '-' else list(map(int, resistances.split(',')))
+        self.word(CREATURE + 0x98, HEAP + 0x1400)
+        self.word(CREATURE + 0x9c, HEAP + 0x1900)
+        self.word(HEAP + 0x1900 + 8, 0x164)
+        self.word(CREATURE + 0x200, HEAP + 0x1a00)
+        self.word(HEAP + 0x1a00 + 8, self.lookup(0, [0x8c] if effect == '1' else []))
+        self.word(HEAP + 0x1400 + 0x68, self.lookup(1, abilities))
+        self.word(HEAP + 0x1400 + 4, self.accessor(8, int(school), pop=0))
+        self.word(HEAP + 0x1400 + 0x28, self.accessor(9, float(reduction), floating=True))
+        self.word(HEAP + 0x1400 + 0x44, self.accessor(10, float(offense), floating=True))
+        self.word(CREATURE + 0xa18, FIELD)
+        self.word(FIELD + 0x60, int(strength))
+        self.word(TARGET, HEAP + 0x1500)
+        self.word(HEAP + 0x1500 + 0x30, self.lookup(2, resistances))
+        self.word(HEAP + 0x1500 + 0x40, self.accessor(11, int(giant), pop=0))
+        self.word(TARGET + 4, HEAP + 0x1800)
+        self.word(HEAP + 0x1800 + 4, 0x1fc)
+        self.word(HEAP + 0x1800 + 8, 0x2fc)
+        self.word(TARGET + 0x200, HEAP + 0x1b00)
+        effects = [code for i, code in enumerate([0x77, 0x79, 0x76, 0x75, 0x78]) if (int(wards) >> i) & 1]
+        self.word(HEAP + 0x1b00 + 8, self.lookup(3, effects))
+        self.word(TARGET + 0x300, HEAP + 0x1c00)
+        self.word(HEAP + 0x1c00 + 4, self.accessor(12, float(bonus), floating=True))
+        self.word(HEAP + 0x1c00 + 8, self.accessor(13, float(defense), floating=True))
+        return self.call(0x1edf30, (int(base) & 0xffffffff, TARGET, int(ranged), int(moved) & 0xffffffff, int(luck)), this=CREATURE)
 
     def call(self, rva, args=(), this=HEAP, floating=False, callee_pop=True):
         sp = STACK + 0x8000
@@ -159,6 +207,8 @@ class Original:
             finally:
                 self.dice_mode = False
             return ' '.join(result)
+        if kind == 'modify':
+            return self.modify(v)
         if kind == 'ratio':
             offense, reduction, defense, bonus = map(float, v)
             self.word(HEAP + 0x1000 + 0x28, self.accessor(0, reduction, floating=True))
@@ -194,14 +244,60 @@ def corpus():
         low, high = bounds
         yield f'dice {seed} 20 3 7 {number} {low} {high} 3'
 
+    yield from modifier_corpus()
+
+
+def modifier_corpus():
+    # Protocol: base offense reduction defense bonus school attacker-abilities
+    # defender-abilities ward-mask giant giant-effect ranged moved luck strength.
+    def case(**changes):
+        fields = dict(base=101, offense=11, reduction=1, defense=11, bonus=1,
+                      school=5, abilities='-', resistances='-', wards=0, giant=0,
+                      effect=0, ranged=0, moved=0, luck=0, strength=3)
+        fields.update(changes)
+        return 'modify ' + ' '.join(map(str, fields.values()))
+    for base, moved, ranged in itertools.product([0, 1, 15, 101, 10001], [0, 499, 500, 501, 524, 525, 700, 1400], [0, 1]):
+        yield case(base=base, abilities='11', moved=moved, ranged=ranged)
+    for giant, effect, abilities, ranged in itertools.product([0, 1], [0, 1], ['-', '28', '43', '53', '28,43,53'], [0, 1]):
+        yield case(giant=giant, effect=effect, abilities=abilities, ranged=ranged)
+    for base, luck, strength in itertools.product([0, 1, 3, 15, 101, 99999], [0, 1, 2], range(4)):
+        yield case(base=base, luck=luck, strength=strength)
+    for school, wards, resistances in itertools.product(range(6), [0, 1, 2, 4, 8, 16, 31, 63], ['-', '34', '16', '10', '34,16,10']):
+        yield case(school=school, wards=wards, resistances=resistances)
+    for abilities, resistances, ranged in itertools.product(['-', '20', '9', '84', '83', '12', '20,12', '9,83,84,12'], ['-', '21', '13', '21,13'], [0, 1]):
+        yield case(abilities=abilities, resistances=resistances, ranged=ranged)
+    for base, stats in itertools.product([0, 1, 3, 15, 101, 10001], [(0.1, 1, 0.1, 1.5), (11, 1.2, 11, 1.5), (11, 2, 11, 1.5), (0, 1, 0, 1), (1000, 1, 0.1, 1), (0.1, 1, 1000, 1)]):
+        offense, reduction, defense, bonus = stats
+        yield case(base=base, offense=offense, reduction=reduction, defense=defense, bonus=bonus)
+        yield case(base=base, offense=offense, reduction=reduction, defense=defense, bonus=bonus,
+                   abilities='11,28,20,12', resistances='21,13', school=3, wards=8,
+                   giant=1, effect=1, moved=700, luck=1, strength=1)
+
+    # Exact-integer boundaries expose rounding of the coefficient before scaling.
+    for offense, defense in itertools.product(range(1, 26), repeat=2):
+        yield case(base=defense, offense=offense, defense=defense)
+    rng = random.Random(0x483452)
+    for _ in range(128):
+        aa = [v for v in [11, 28, 43, 53, 20, 9, 84, 83, 12] if rng.randrange(2)]
+        da = [v for v in [34, 16, 10, 21, 13] if rng.randrange(2)]
+        yield case(base=rng.choice([0, 1, 3, 15, 101, 99999]),
+                   offense=rng.choice([0.1, 5, 11, 15, 1000]),
+                   defense=rng.choice([0.1, 6, 11, 19, 1000]),
+                   reduction=rng.choice([0.5, 1, 1.2, 2]), bonus=rng.choice([0.5, 1, 1.5, 2]),
+                   abilities=','.join(map(str, aa)) or '-', resistances=','.join(map(str, da)) or '-',
+                   school=rng.randrange(6), wards=rng.randrange(64), giant=rng.randrange(2),
+                   effect=rng.randrange(2), ranged=rng.randrange(2), moved=rng.choice([500, 501, 525, 700, 1400]),
+                   luck=rng.randrange(3), strength=rng.randrange(4))
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--exe', type=Path, required=True)
     parser.add_argument('--report', type=Path, default=ROOT / 'target/testbench-report.json')
+    parser.add_argument('--only', choices=['global', 'combat', 'dice', 'ratio', 'final', 'modify'])
     args = parser.parse_args()
     original = Original(args.exe)
-    cases = list(corpus())
+    cases = [case for case in corpus() if args.only is None or case.split()[0] == args.only]
     subprocess.run(['cargo', 'build', '--locked', '-q', '-p', 'h4-rules', '--example', 'exe_reference'], cwd=ROOT, check=True)
     proc = subprocess.run([str(ROOT / 'target/debug/examples/exe_reference')], input='\n'.join(cases)+'\n', text=True, capture_output=True, check=True)
     results = proc.stdout.splitlines()
@@ -213,11 +309,11 @@ def main():
         if index % 32 == 0:
             print(f"checking {index + 1}/{len(cases)}", flush=True)
         exe = original.evaluate(case)
-        if case.startswith(('combat ', 'dice ')):
+        if case.startswith(('combat ', 'dice ', 'modify ')):
             vectors.append(dict(input=case, exe=exe))
         if exe != rust:
             failures.append(dict(input=case, exe=exe, rust=rust))
-    report = dict(exe_sha256=SHA256, unicorn=__import__('unicorn').__version__, cases=len(cases), failures=failures, vectors=vectors)
+    report = dict(exe_sha256=SHA256, unicorn=__import__('unicorn').__version__, x87_control=original.uc.reg_read(UC_X86_REG_FPCW), cases=len(cases), failures=failures, vectors=vectors)
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(report, indent=2)+'\n')
     print(f'{len(cases)} cases, {len(failures)} differences; {args.report}')
