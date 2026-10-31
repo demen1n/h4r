@@ -83,7 +83,7 @@ pub struct Layer {
 }
 
 impl Layer {
-    fn read(r: &mut Reader) -> Result<Layer> {
+    pub(crate) fn read(r: &mut Reader) -> Result<Layer> {
         let palette_size = r.u16()? as usize;
         let has_block_alpha = r.u16()? != 0;
         let palette = r.take(3 * palette_size)?.as_chunks::<3>().0.iter().map(|&[blue, green, red]| [red, green, blue]).collect();

@@ -15,6 +15,7 @@
 pub mod adv_actor;
 pub mod adv_object;
 pub mod archive;
+pub mod battlefield;
 pub mod catalog;
 pub mod combat_actor;
 pub mod cp1251;
