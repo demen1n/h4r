@@ -43,7 +43,7 @@ impl Mask {
         for (x, c) in columns.iter_mut().enumerate() {
             *c = offset;
             let h = column_height(x);
-            offset += if depth == 4 { (h + 1) / 2 } else { (h + 7) / 8 };
+            offset += if depth == 4 { h.div_ceil(2) } else { h.div_ceil(8) };
         }
         Mask { depth, data, columns }
     }

@@ -651,7 +651,7 @@ impl State<'_> {
                 && alignment.is_none_or(|a| c.alignment == a);
             if fits {
                 seen += 1;
-                if rng.next() % seen == 0 {
+                if rng.next().is_multiple_of(seen) {
                     chosen = Some(id);
                 }
             }

@@ -135,7 +135,7 @@ fn terrain_metatiles() {
         for (i, tile) in metatile.tiles.iter().enumerate() {
             let mut canvas = vec![0u8; 4 * TILE_WIDTH * 2 * TILE_HEIGHT];
             metatile.draw_tile(tile, &mut canvas, TILE_WIDTH, 0, 0);
-            for (p, px) in canvas.chunks_exact(4).enumerate() {
+            for (p, px) in canvas.as_chunks::<4>().0.iter().enumerate() {
                 if px[3] == 0 {
                     continue;
                 }

@@ -176,6 +176,10 @@ pub fn roll_base_damage(attacker: &Attacker, target_id: u32, dice: &mut CombatRa
 ///
 /// `moved` is how far the attacker moved before hitting, used by `charging` (the unit is
 /// the battlefield's internal distance; the bonus starts above 500).
+///
+/// The arguments follow the exe function one to one, which is why there are more than
+/// Clippy likes; [`attack_hit`] with [`HitOptions`] is the friendlier way to call it.
+#[allow(clippy::too_many_arguments)]
 pub fn modify_damage(
     base: i32,
     attacker: &Attacker,

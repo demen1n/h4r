@@ -86,7 +86,7 @@ impl Layer {
     fn read(r: &mut Reader) -> Result<Layer> {
         let palette_size = r.u16()? as usize;
         let has_block_alpha = r.u16()? != 0;
-        let palette = r.take(3 * palette_size)?.chunks_exact(3).map(|c| [c[2], c[1], c[0]]).collect();
+        let palette = r.take(3 * palette_size)?.as_chunks::<3>().0.iter().map(|&[blue, green, red]| [red, green, blue]).collect();
         let name = r.str16()?;
         let alpha_depth = r.u8()?;
         let rect = Rect { left: r.i32()?, top: r.i32()?, right: r.i32()?, bottom: r.i32()? };
@@ -112,7 +112,7 @@ impl Layer {
         let pixels = r.take(n)?.to_vec();
         let mut alpha = Vec::new();
         if alpha_depth >= 4 && n > 0 {
-            alpha = r.take((n + 1) / 2)?.to_vec();
+            alpha = r.take(n.div_ceil(2))?.to_vec();
             if has_block_alpha {
                 r.take((n + 131) / 128)?;
             }

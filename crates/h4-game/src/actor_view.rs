@@ -29,9 +29,14 @@ impl Animation {
     }
 }
 
+/// Animations already loaded, by (action, direction). `None` remembers that one is missing,
+/// so we don't try to load it again every frame. `RefCell` lets `animation(&self)` fill the
+/// cache although it only borrows the actor.
+type AnimationCache = RefCell<HashMap<(String, &'static str), Option<Rc<Animation>>>>;
+
 pub struct Actor {
     pub model: AdvActorModel,
-    animations: RefCell<HashMap<(String, &'static str), Option<Rc<Animation>>>>,
+    animations: AnimationCache,
 }
 
 impl Actor {

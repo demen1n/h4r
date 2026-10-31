@@ -61,7 +61,7 @@ impl Metatile {
             tiles.push(Tile { data, columns });
         }
         let palette_size = r.u32()? as usize;
-        let palette = r.take(3 * palette_size)?.chunks_exact(3).map(|c| [c[2], c[1], c[0]]).collect();
+        let palette = r.take(3 * palette_size)?.as_chunks::<3>().0.iter().map(|&[blue, green, red]| [red, green, blue]).collect();
         if r.remaining() != 0 {
             return bad(format!("{} bytes left after metatile", r.remaining()));
         }

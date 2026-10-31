@@ -317,6 +317,8 @@ mod tests {
     use super::*;
     use h4_state::army::{Hero, Stack};
 
+    // A test helper: one argument per stat reads better in the tests than a struct.
+    #[allow(clippy::too_many_arguments)]
     fn creature(hp: i32, low: i32, high: i32, attack: i32, defense: i32, speed: i32, shots: i32, xp: i32) -> CreatureStats {
         CreatureStats {
             keyword: String::new(),

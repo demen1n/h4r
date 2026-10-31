@@ -131,9 +131,10 @@ fn ground(map: &MapFile) -> AdventureMap {
 /// An army as the map stores it, with what [`Placement::Army`] decided for it: classes
 /// of random heroes and sizes of stacks left at 0.
 fn army_of(stored: &map_army::Army, placement: Option<&Placement>) -> Army {
-    let (chosen_heroes, counts): (&[Option<(usize, bool)>], &[(usize, i32)]) = match placement {
-        Some(Placement::Army { heroes, counts }) => (heroes, counts),
-        _ => (&[], &[]),
+    // Without a placement there is nothing chosen: two empty lists (`Default` of a slice).
+    let (chosen_heroes, counts) = match placement {
+        Some(Placement::Army { heroes, counts }) => (heroes.as_slice(), counts.as_slice()),
+        _ => Default::default(),
     };
     let mut heroes = chosen_heroes.iter();
     let mut army = Army::default();
