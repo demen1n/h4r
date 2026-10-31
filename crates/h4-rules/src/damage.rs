@@ -41,12 +41,19 @@ pub mod ability {
     pub const LIFE_PROTECTION: u8 = 0x22;
     /// Doubles damage against "giant" targets in melee. The table says `mechanical`.
     pub const SLAYER_MELEE: u8 = 0x2b;
-    /// Extra HP-based damage after effect 0x98 eligibility/resistance checks.
-    /// The transferred enum name `stealth` does not fit the code; keep the numeric name.
+    /// Extra damage based on the target's hit points, after the checks of effect 0x98
+    /// (may the effect touch this target, how much of it is resisted). See
+    /// [`super::finalize_attack_damage`]. The transferred enum name `stealth` does not fit
+    /// the code, so we keep the numeric name until the real one is confirmed.
     pub const ABILITY_42: u8 = 0x42;
+    /// The target is undead. One of the three abilities that make a target immune to
+    /// [`ABILITY_42`]; the name is confirmed by the combat damage code.
     pub const UNDEAD: u8 = 0x4d;
-    /// Excluded target ability; transferred enum says magic_immunity (not verified).
+    /// Another ability that makes a target immune to [`ABILITY_42`]. The transferred enum
+    /// says `magic_immunity` (not verified), hence the numeric name.
     pub const ABILITY_2A: u8 = 0x2a;
+    /// The target is an elemental: the third immunity to [`ABILITY_42`]. Name confirmed by
+    /// the combat damage code (as for [`UNDEAD`]).
     pub const ELEMENTAL: u8 = 0x11;
     pub const RANGED: u8 = 0x33;
     pub const RANGED_GIANTSLAYER: u8 = 0x35;
@@ -296,10 +303,15 @@ fn is_warded(school: School, defender: &Defender) -> bool {
     school != School::Might && (by_spell || by_ability)
 }
 
-/// Inputs resolved by target typing and spell rules for ability 0x42's effect 0x98.
-/// They are explicit because full spell targeting/immunity rules are not implemented.
+/// What ability 0x42 needs to know about its target that only other game rules can say.
+///
+/// In the game these come from the type of the target and from the spell rules for effect
+/// 0x98 (who it can touch, how much is resisted). We don't have those rules yet, so instead
+/// of guessing them the caller passes the answers in; the exe comparison bench passes the
+/// same answers to the original code.
 #[derive(Debug, Clone, Copy)]
 pub struct Ability42Target {
+    /// The target is a creature stack (not, say, a wall or a tower). Otherwise no bonus.
     pub is_creature: bool,
     /// Result of the effect 0x98 target-eligibility check (RVA 1b6140).
     pub can_affect: bool,
@@ -311,7 +323,14 @@ pub struct Ability42Target {
     pub creature_hit_points: i32,
 }
 
-/// Complete finalization: ability 0x42, remaining HP, then block (RVA 1ee540).
+/// The whole last step of a hit (rva `1ee540`): ability 0x42's bonus, then the limits of
+/// [`finalize_damage`] (remaining hit points, then block).
+///
+/// Bonus of ability 0x42, if the attacker has it, the target is none of undead / 0x2a /
+/// elemental, and `effect` says the target is a creature the effect can touch:
+/// `power = effectiveness% * power% / 100`; if `power * number >= 500` (number = attacker's
+/// stack size), add `power * number / 1000 * hit points of one target creature`, rounded
+/// toward zero. `effect: None` means "unknown" and gives no bonus.
 pub fn finalize_attack_damage(
     damage: i32,
     attacker: &Attacker,
@@ -321,11 +340,13 @@ pub fn finalize_attack_damage(
     log: &mut Vec<DamageEvent>,
 ) -> i32 {
     let mut damage = damage;
-    if attacker.has(ability::ABILITY_42)
-        && ![ability::UNDEAD, ability::ABILITY_2A, ability::ELEMENTAL]
-            .iter().any(|&a| defender.has(a))
-    {
+    let immune = [ability::UNDEAD, ability::ABILITY_2A, ability::ELEMENTAL]
+        .iter()
+        .any(|&a| defender.has(a));
+    if attacker.has(ability::ABILITY_42) && !immune {
         if let Some(target) = effect.filter(|t| t.is_creature && t.can_affect) {
+            // The game multiplies 32-bit integers and lets them overflow; `wrapping_*`
+            // does the same instead of panicking in a debug build.
             let power = target.effectiveness_percent.wrapping_mul(target.power_percent) / 100;
             if power.wrapping_mul(attacker.number) >= 500 {
                 // Preserve x87 operation order: (power * number) * .001 * target HP.
@@ -339,36 +360,71 @@ pub fn finalize_attack_damage(
     finalize_damage(damage, defender, already_dealt, log)
 }
 
-/// Explicit inputs for one numerical attack, including resolved effect targeting.
+/// Everything about one hit that isn't a property of the two creatures. Grouped in a struct
+/// so a caller names what it sets and leaves the rest at [`HitOptions::default`]
+/// (melee, no move, normal luck, no damage dealt yet, ability 0x42 unknown).
 #[derive(Debug, Clone)]
 pub struct HitOptions {
+    /// A shot rather than a melee strike.
     pub ranged: bool,
+    /// How far the attacker moved before striking, for `charging` (battlefield distance
+    /// units, see [`modify_damage`]).
     pub moved: i32,
+    /// Which luck came up; rolling for it is the caller's job.
     pub luck: Luck,
+    /// How strong the luck is, one of [`LUCK_MULTIPLIERS`]; unused for normal luck.
     pub luck_multiplier: f64,
+    /// Damage the target has already taken in this attack (see [`finalize_damage`]).
     pub already_dealt: i32,
+    /// Answers for ability 0x42, or `None` if the caller can't give them (no bonus then).
     pub ability_42: Option<Ability42Target>,
 }
 
 impl Default for HitOptions {
     fn default() -> Self {
-        Self { ranged: false, moved: 0, luck: Luck::Normal, luck_multiplier: 1.0,
-            already_dealt: 0, ability_42: None }
+        Self {
+            ranged: false,
+            moved: 0,
+            luck: Luck::Normal,
+            luck_multiplier: LUCK_MULTIPLIERS[0],
+            already_dealt: 0,
+            ability_42: None,
+        }
     }
 }
 
-/// Dice -> complete modifier chain -> finalization, sharing a single battle RNG.
-/// Range/obstacle penalties and the choice of luck outcome belong to the caller.
+/// One hit from start to end, in the game's order: dice ([`roll_base_damage`]), modifiers
+/// ([`modify_damage`]), last step ([`finalize_attack_damage`]). All dice come from the one
+/// battle generator, so the order of the calls matters for the next roll too.
+///
+/// Not here (the caller's job): range and obstacle penalties, rolling for luck.
 pub fn attack_hit(
-    attacker: &Attacker, defender: &Defender, options: &HitOptions,
-    dice: &mut CombatRandom, log: &mut Vec<DamageEvent>,
+    attacker: &Attacker,
+    defender: &Defender,
+    options: &HitOptions,
+    dice: &mut CombatRandom,
+    log: &mut Vec<DamageEvent>,
 ) -> i32 {
     let base = roll_base_damage(attacker, defender.id, dice);
     log.push(DamageEvent::Rolled { damage: base });
-    let modified = modify_damage(base, attacker, defender, options.ranged, options.moved,
-        options.luck, options.luck_multiplier, log);
-    finalize_attack_damage(modified, attacker, defender, options.already_dealt,
-        options.ability_42.as_ref(), log)
+    let modified = modify_damage(
+        base,
+        attacker,
+        defender,
+        options.ranged,
+        options.moved,
+        options.luck,
+        options.luck_multiplier,
+        log,
+    );
+    finalize_attack_damage(
+        modified,
+        attacker,
+        defender,
+        options.already_dealt,
+        options.ability_42.as_ref(),
+        log,
+    )
 }
 
 /// The last limits (rva `1ee540`): no more than the target's remaining hit points
