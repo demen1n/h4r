@@ -21,7 +21,7 @@ calling game functions: x87 uses 53-bit precision, as selected at exe startup
 `0x023f` (53-bit precision, nearest rounding, masked exceptions), which is checked
 and recorded in the report. Skipping this initialization produces misleading differences.
 
-The deterministic corpus has 2,945 requests:
+The deterministic corpus has 10,353 requests:
 
 - 8 seeds × 256 consecutive global RNG outputs (RVA `36a70`), including unsigned
   overflow and the high bit; 2,048 individual numbers.
@@ -51,6 +51,12 @@ The deterministic corpus has 2,945 requests:
   (executing real `1edf30`), each followed by `1ee540` on the same fixture
   objects/RNG, plus the next RNG output. Includes melee/ranged and combined effects.
 
+- 320 effectiveness cases (RVA `1f1de0`): flags, side equality, abilities
+  0x52/0x1f and signed resistance edge values.
+- 7,088 immunity scenarios: each executes general immunities (`1b3540`),
+  target-kind immunities (`1b3a10`), the effect-0x98 branch of `1b4770`,
+  and the full-resistance eligibility gate (`1b5750`). Four outputs per scenario.
+
 Virtual accessors are tiny fixture stubs returning supplied values. The actual
 RNG, arithmetic, branches, limits and rounding execute from the original image.
 Calls have a 30-second execution timeout and a stack-balance check. Modified accessor
@@ -74,7 +80,7 @@ answers. It also stores the original answers for combat/dice/modifier/finalizati
 `vectors`. Differences cause exit status 1; unsupported images or execution errors
 also fail the command. `--report PATH` selects another destination.
 
-Verified on 31 October 2026: 2,945 requests, zero differences. The first run exposed
+Verified on 31 October 2026: 10,353 requests, zero differences. The first run exposed
 two one-ULP differences in the Rust damage coefficient: the original keeps the
 denominator in x87 precision. The fix has a normal Rust regression test.
 
@@ -129,3 +135,12 @@ Effectiveness helper: `--only effectiveness` compares 320 cases of RVA `1f1de0`
 (flags, sides, abilities 0x52/0x1f, specific versus generic resistance, i32 edges).
 Eligibility and resistance accessors remain explicit fixture inputs. Expected
 answers are retained in `h4-rules/tests/effectiveness_vectors.tsv` for CI.
+
+Use `--only immunity` for the four independent eligibility filters. The fixture
+supplies effect-0x98 record flags, ability/effect lists, side accessors and target
+resistance. The original functions calculate each filter outcome; `is_hostile`
+and flag checks execute natively. Localized diagnostic strings are marked
+initialized and diagnostic output is disabled; a minimal SEH chain supports the
+original no-output diagnostic helper. This does not test the full `1b30a0`
+pipeline, artifact/side/refresh filters, record loading or resistance derivation.
+All 7,088 original output rows live in `h4-rules/tests/immunity_vectors.tsv`.

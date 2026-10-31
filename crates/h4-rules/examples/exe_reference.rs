@@ -9,6 +9,8 @@
 //! `tests/`, so a stored original answer is checked through exactly this code path.
 #[path = "support/attack_case.rs"]
 mod attack_case;
+#[path = "support/immunity_case.rs"]
+mod immunity_case;
 #[path = "support/modifier_case.rs"]
 mod modifier_case;
 use h4_rules::{
@@ -47,6 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             total_hit_points: 1,
         };
         match v.as_slice() {
+            ["immunity", fields @ ..] => println!("{}", immunity_case::evaluate(fields)?),
             ["effectiveness", eligible, resisted, between, same, bypass, generic, specific_r, generic_r] =>
             {
                 let inputs = h4_rules::effects::Effectiveness {
