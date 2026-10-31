@@ -283,6 +283,32 @@ class Original:
             finally:
                 self.dice_mode = False
             return ' '.join(result)
+        if kind == 'effectiveness':
+            eligible, resisted, between, same, bypass, generic, specific_r, generic_r = map(int, v)
+            self.effect_mode = True
+            self.effect_can_affect = bool(eligible)
+            self.word(CREATURE + 0x98, HEAP + 0x1400)
+            abilities = ([0x52] if bypass else []) + ([0x1f] if generic else [])
+            self.word(HEAP + 0x1400 + 0x68, self.lookup(0, abilities))
+            self.word(TARGET + 0x98, HEAP + 0x1d00)
+            # Native accessor dispatches -1 separately from the actual effect id.
+            address = HEAP + 0x2800
+            code = b'\x83\x7c\x24\x04\xff\x75\x08\xb8' + struct.pack('<I', generic_r & 0xffffffff)
+            code += b'\xc2\x04\x00\xb8' + struct.pack('<I', specific_r & 0xffffffff) + b'\xc2\x04\x00'
+            self.uc.mem_write(address, code)
+            self.uc.ctl_remove_cache(address, address + 32)
+            self.word(HEAP + 0x1d00 + 0x7c, address)
+            for obj, side, slot in [(CREATURE, 0, 20), (TARGET, 0 if same else 1, 21)]:
+                self.word(obj + 0x9c, HEAP + 0x5000)
+                self.word(HEAP + 0x5008, 0x40)
+                self.word(obj + 0xdc, HEAP + 0x5100 + slot * 16)
+                self.word(HEAP + 0x5100 + slot * 16 + 4, self.accessor(slot, side))
+            self.word(HEAP + 0xd000 + 0x3c, resisted * 0x800000 | between * 0x1000000)
+            try:
+                raw = int(self.call(0x1f1de0, (TARGET, 0x98), this=CREATURE))
+                return str(raw if raw < 0x80000000 else raw - 0x100000000)
+            finally:
+                self.effect_mode = False
         if kind in ('ability42', 'attack'):
             return self.complete(kind, v)
         if kind == 'modify':
@@ -304,6 +330,9 @@ class Original:
 
 
 def corpus():
+    for flags in itertools.product([0, 1], repeat=6):
+        for specific, generic in [(0, 0), (25, 75), (100, 0), (-10, 120), (2147483647, -2147483648)]:
+            yield 'effectiveness ' + ' '.join(map(str, (*flags, specific, generic)))
     for seed in [0, 1, 7, 12345, 32767, 0x7fffffff, 0x80000000, 0xffffffff]:
         yield f'global {seed} 256'
     for values in itertools.product([0, 0.1, 1, 11, 1000], [0.5, 1, 1.2, 2], [0, 0.1, 11, 1000], [0.5, 1, 1.5, 2]):
@@ -399,7 +428,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--exe', type=Path, required=True)
     parser.add_argument('--report', type=Path, default=ROOT / 'target/testbench-report.json')
-    parser.add_argument('--only', choices=['global', 'combat', 'dice', 'ratio', 'final', 'modify', 'ability42', 'attack'])
+    parser.add_argument('--only', choices=['global', 'combat', 'dice', 'ratio', 'final', 'modify', 'ability42', 'attack', 'effectiveness'])
     args = parser.parse_args()
     original = Original(args.exe)
     cases = [case for case in corpus() if args.only is None or case.split()[0] == args.only]
@@ -414,7 +443,7 @@ def main():
         if index % 32 == 0:
             print(f"checking {index + 1}/{len(cases)}", flush=True)
         exe = original.evaluate(case)
-        if case.startswith(('combat ', 'dice ', 'modify ', 'ability42 ', 'attack ')):
+        if case.startswith(('combat ', 'dice ', 'modify ', 'ability42 ', 'attack ', 'effectiveness ')):
             vectors.append(dict(input=case, exe=exe))
         if exe != rust:
             failures.append(dict(input=case, exe=exe, rust=rust))

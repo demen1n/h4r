@@ -24,4 +24,5 @@ pub mod movement;
 pub mod new_game;
 pub mod placement;
 pub mod random;
+pub mod effects;
 pub mod turns;
