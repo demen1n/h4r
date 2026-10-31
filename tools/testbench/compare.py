@@ -8,11 +8,14 @@ from pathlib import Path
 import struct
 import subprocess
 
-from unicorn import Uc, UC_ARCH_X86, UC_MODE_32
+from unicorn import Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_CODE
 from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_ECX, UC_X86_REG_ESP, UC_X86_REG_EIP
 
 ROOT = Path(__file__).resolve().parents[2]
 SHA256 = '175eacb4838c86e5aee03f31e2406004a06dd238933517e2df40669cf17d36ff'
+ARENA, ARENA_SIZE = 0x4000000, 0x2000000
+RNG, FIELD, CREATURE, TARGET = 0x2004000, 0x2005000, 0x2006000, 0x2007000
+
 BASE, HEAP, STACK, STOP = 0x400000, 0x2000000, 0x3000000, 0x200f000
 
 
@@ -38,10 +41,59 @@ class Original:
             self.uc.mem_write(BASE + va, data[raw:raw + raw_size])
         self.uc.mem_map(HEAP, 0x10000)
         self.uc.mem_map(STACK, 0x10000)
+        self.uc.mem_map(ARENA, ARENA_SIZE)
+        self.arena_next = ARENA
+        # Only platform services and fixture boundaries are intercepted. The original
+        # map, vector, key comparison, counters and checkpoint arithmetic all execute.
+        for address in [0x8d98b0, 0x8dbda0, 0x8df945, 0x8df9e1, 0x8ed444, 0x5edf30]:
+            self.uc.hook_add(UC_HOOK_CODE, self.service, begin=address, end=address)
+        self.dice_mode = False
         # Virtual accessors return supplied fixture values. Arithmetic stays in exe code.
         self.uc.mem_write(STOP, b'\xd9\x1d' + struct.pack('<I', HEAP + 0xe000))  # fstp float
         self.uc.mem_write(HEAP, struct.pack('<I', HEAP + 0x1000))
         self.uc.mem_write(HEAP + 0x200, struct.pack('<I', HEAP + 0x1200))
+
+    def read_word(self, address):
+        return struct.unpack('<I', self.uc.mem_read(address, 4))[0]
+
+    def service(self, uc, address, size, _):
+        sp = uc.reg_read(UC_X86_REG_ESP)
+        pop = 0
+        if address == 0x8d98b0:  # operator new(size), cdecl
+            size = self.read_word(sp + 4)
+            result = self.arena_next
+            self.arena_next += (max(size, 1) + 15) & ~15
+            if self.arena_next > ARENA + ARENA_SIZE:
+                raise RuntimeError('fixture allocator exhausted')
+            uc.mem_write(result, bytes(size))
+            uc.reg_write(UC_X86_REG_EAX, result)
+        elif address in (0x8dbda0, 0x8df945, 0x8df9e1):
+            pass  # delete / single-threaded CRT lock / unlock
+        elif address == 0x8ed444:
+            if not self.dice_mode:
+                raise RuntimeError('unexpected dynamic_cast outside dice fixture')
+            if self.read_word(sp + 4) != TARGET:
+                raise RuntimeError('unexpected dynamic_cast input')
+            uc.reg_write(UC_X86_REG_EAX, TARGET)
+        elif address == 0x5edf30:
+            if not self.dice_mode:
+                raise RuntimeError('unexpected modifier call outside dice fixture')
+            # Observe the base roll before modifiers; do not reproduce its formula.
+            uc.reg_write(UC_X86_REG_EAX, self.read_word(sp + 4))
+            pop = 20
+        uc.reg_write(UC_X86_REG_EIP, self.read_word(sp))
+        uc.reg_write(UC_X86_REG_ESP, sp + 4 + pop)
+
+    def combat_start(self, seed, modulus):
+        self.arena_next = ARENA
+        self.uc.mem_write(RNG, bytes(0x28))
+        self.word(0xaa1c30, 0)  # shared std::map nil; constructor initializes it
+        self.word(0xaa1c2c, 0)
+        self.word(FIELD + 0x438, modulus + 1)
+        self.call(0x2031b0, (seed, FIELD), this=RNG)
+
+    def combat_roll(self, a, b, purpose):
+        return self.call(0x203280, (a, b, purpose), this=RNG)
 
     def word(self, address, value):
         self.uc.mem_write(address, struct.pack('<I', value & 0xffffffff))
@@ -61,9 +113,9 @@ class Original:
         self.uc.mem_write(sp, struct.pack('<' + 'I' * (len(args)+1), STOP, *args))
         self.uc.reg_write(UC_X86_REG_ESP, sp)
         self.uc.reg_write(UC_X86_REG_ECX, this)
-        self.uc.emu_start(BASE + rva, STOP, count=10000)
+        self.uc.emu_start(BASE + rva, STOP, timeout=30_000_000)
         if self.uc.reg_read(UC_X86_REG_EIP) != STOP:
-            raise RuntimeError('instruction limit reached')
+            raise RuntimeError(f'execution timed out at RVA {rva:x}')
         expected = sp + 4 + (4 * len(args) if callee_pop else 0)
         if self.uc.reg_read(UC_X86_REG_ESP) != expected:
             raise RuntimeError('unexpected calling convention / stack imbalance')
@@ -78,6 +130,35 @@ class Original:
             seed, count = map(int, v)
             self.word(HEAP + 0x400, seed)
             return ' '.join(self.call(0x36a70, this=HEAP + 0x400) for _ in range(count))
+        if kind == 'combat':
+            seed, modulus, *rolls = map(int, v)
+            self.combat_start(seed, modulus)
+            result = []
+            for a, b, purpose in zip(rolls[::3], rolls[1::3], rolls[2::3]):
+                if purpose == 44:  # protocol marker: reset the actual generator
+                    self.call(0x203430, (a,), this=RNG)
+                    continue
+                result.append(self.combat_roll(a, b, purpose))
+            return ' '.join(result)
+        if kind == 'dice':
+            seed, modulus, attacker, target, number, low, high, hits = map(int, v)
+            self.combat_start(seed, modulus)
+            self.word(CREATURE + 0x98, HEAP + 0x1400)
+            self.word(HEAP + 0x1400 + 0x24, self.accessor(6, low, pop=0))
+            self.word(HEAP + 0x1400 + 0x20, self.accessor(7, high, pop=0))
+            self.word(CREATURE + 0xb0, number)
+            self.word(CREATURE + 0xa30, attacker)
+            self.word(CREATURE + 0xa18, FIELD)
+            self.word(FIELD + 0x380, RNG)
+            self.word(TARGET + 0xa30, target)
+            self.dice_mode = True
+            try:
+                result = [self.call(0x1ee240, (TARGET, 0, 0, 0), this=CREATURE) for _ in range(hits)]
+                # Verify how many RNG rolls the damage routine consumed, even low==high.
+                result.append(self.combat_roll(target, attacker, 0))
+            finally:
+                self.dice_mode = False
+            return ' '.join(result)
         if kind == 'ratio':
             offense, reduction, defense, bonus = map(float, v)
             self.word(HEAP + 0x1000 + 0x28, self.accessor(0, reduction, floating=True))
@@ -102,6 +183,17 @@ def corpus():
     for values in itertools.product([0, 1, 5, 15, 50, 10000], [0, 1, 30, 1000], [0, 10, 1000], [0, 1]):
         yield 'final ' + ' '.join(map(str, values))
 
+    for seed, modulus in itertools.product([0, 1, 32767, 0xffffffff], [1, 2, 10, 20]):
+        rolls = [(3, 7, 0), (3, 7, 0), (3 + modulus, 7 + modulus, 0),
+                 (7, 3, 0), (3, 7, 1), (3, 7, 29), (250, 15, 30),
+                 (50, 215, 30), (0xffffffff, 0x80000000, 43), (3, 7, 2), (3, 7, 3), (3, 7, 0),
+                 (seed, 0, 44), (3, 7, 0), (250, 15, 30),
+                 (seed ^ 0x1234, 0, 44), (3, 7, 0), (3, 7, 0)]
+        yield f'combat {seed} {modulus} ' + ' '.join(str(v) for roll in rolls for v in roll)
+    for seed, number, bounds in itertools.product([1, 32767], [0, 1, 5, 9, 10, 11, 19, 1000], [(1, 1), (1, 3), (7, 19)]):
+        low, high = bounds
+        yield f'dice {seed} 20 3 7 {number} {low} {high} 3'
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -116,11 +208,16 @@ def main():
     if len(results) != len(cases):
         raise RuntimeError('reference returned wrong number of results')
     failures = []
-    for case, rust in zip(cases, results):
+    vectors = []
+    for index, (case, rust) in enumerate(zip(cases, results)):
+        if index % 32 == 0:
+            print(f"checking {index + 1}/{len(cases)}", flush=True)
         exe = original.evaluate(case)
+        if case.startswith(('combat ', 'dice ')):
+            vectors.append(dict(input=case, exe=exe))
         if exe != rust:
             failures.append(dict(input=case, exe=exe, rust=rust))
-    report = dict(exe_sha256=SHA256, unicorn=__import__('unicorn').__version__, cases=len(cases), failures=failures)
+    report = dict(exe_sha256=SHA256, unicorn=__import__('unicorn').__version__, cases=len(cases), failures=failures, vectors=vectors)
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(report, indent=2)+'\n')
     print(f'{len(cases)} cases, {len(failures)} differences; {args.report}')

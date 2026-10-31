@@ -9,7 +9,8 @@
 //!   adventure map events, map generation, and the seed of each battle.
 //! - [`CombatRandom`] is what battles use. Instead of "the next number", every roll asks for
 //!   the number at a position computed from *who* rolls and *why*, so two computers (or a
-//!   replay) get the same result no matter in which order the rolls happen.
+//!   replay) normally get the same result regardless of roll order (see the small-index
+//!   cache quirk documented on [`CombatRandom::roll`]).
 //!
 //! Rules never use a hidden global: whoever runs a battle owns its `CombatRandom` and passes
 //! it in, so a test can fix the seed and get the same fight every time.
@@ -80,6 +81,10 @@ impl CombatRandom {
     }
 
     /// A number in 0..=32767 for this (first, second, purpose) roll.
+    ///
+    /// Compatibility quirk: an index below 128 after a cached index uses the old
+    /// last checkpoint and clears the cache. With modulus 1, interleaving purposes
+    /// can therefore change results (confirmed by executing the original code).
     pub fn roll(&mut self, first: u32, second: u32, purpose: u32) -> u32 {
         let m = if purpose < 30 { self.id_modulus } else { 200 };
         let a = first % m;
@@ -97,8 +102,19 @@ impl CombatRandom {
         output(step(self.state_after(index)))
     }
 
-    /// The generator state after `n` steps from the seed.
+    /// State used for index `n`: normally n steps from the seed, with the original
+    /// small-index cache quirk preserved.
     fn state_after(&mut self, n: u32) -> u32 {
+        // Original RVA 203280 underflows (n / 128) - 1 for small indexes. If
+        // checkpoints exist, it shrinks the vector to zero but still reads its
+        // former last state, instead of restarting at the seed. Preserve this
+        // observable quirk: modulus 1 can reach it after interleaved purposes.
+        if n < CHECKPOINT_STEP {
+            if let Some(state) = self.checkpoints.last().copied() {
+                self.checkpoints.clear();
+                return state;
+            }
+        }
         let blocks = n / CHECKPOINT_STEP;
         // Make sure the checkpoints reach block `blocks` (they are built in order).
         while (self.checkpoints.len() as u32) < blocks {
