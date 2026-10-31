@@ -19,6 +19,8 @@ pub fn resources() -> Option<Resources> {
 }
 
 /// Visible resource names starting with `prefix` (case-insensitive), sorted for stable output.
+// Each test file compiles this module separately; `maps.rs` does not need this helper.
+#[allow(dead_code)]
 pub fn names_with_prefix<'a>(res: &'a Resources, prefix: &str) -> Vec<&'a str> {
     let mut names: Vec<&str> = res.names().filter(|n| n.to_lowercase().starts_with(prefix)).collect();
     names.sort();
