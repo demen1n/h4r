@@ -40,6 +40,9 @@ class Original:
         for i in range(struct.unpack_from('<H', data, pe + 6)[0]):
             _, va, raw_size, raw = struct.unpack_from('<IIII', data, sections + 40*i + 8)
             self.uc.mem_write(BASE + va, data[raw:raw + raw_size])
+        # Minimal single-thread SEH chain used by diagnostic helpers (FS:[0]).
+        self.uc.mem_map(0, 0x1000)
+        self.word(0, 0xffffffff)
         self.uc.mem_map(HEAP, 0x10000)
         self.uc.mem_map(STACK, 0x10000)
         self.uc.mem_map(ARENA, ARENA_SIZE)
@@ -283,6 +286,56 @@ class Original:
             finally:
                 self.dice_mode = False
             return ' '.join(result)
+        if kind == 'immunity':
+            flags, caster, target, effects, hostile, same, resistance = v
+            flags, hostile, same, resistance = map(int, (flags, hostile, same, resistance))
+            def values(value):
+                return [] if value in ('-', 'none') else list(map(int, value.split(',')))
+            self.effect_mode = True
+            self.word(HEAP + 0xd000 + 0x3c, flags)
+            self.word(CREATURE + 0x98, HEAP + 0x1400)
+            self.word(TARGET + 0x98, HEAP + 0x1d00)
+            self.word(HEAP + 0x1400 + 0x68, self.lookup(0, values(caster)))
+            self.word(HEAP + 0x1d00 + 0x68, self.lookup(1, values(target)))
+            self.word(HEAP + 0x1d00 + 0x7c, self.accessor(16, resistance & 0xffffffff))
+            self.word(HEAP + 0x1400 + 0x74, self.accessor(18, 2, pop=0))
+            for obj, slot in [(CREATURE, 19), (TARGET, 20)]:
+                self.word(obj + 0x9c, HEAP + 0x5000)
+                self.word(HEAP + 0x5008, 0x40)
+                self.word(obj + 0xdc, HEAP + 0x5100 + slot * 16)
+            target_vtable = HEAP + 0x5100 + 20 * 16
+            self.word(target_vtable + 8, self.lookup(2, values(effects)))
+            self.word(target_vtable, self.accessor(21, 0))  # not an allied side
+            # +4(0) returns side id, +4(caster side=2) returns friendliness.
+            address = HEAP + 0x2800
+            code = b'\x83\x7c\x24\x04\x00\x75\x08\xb8'
+            code += struct.pack('<I', 2 if same else 3) + b'\xc2\x04\x00\xb8'
+            code += struct.pack('<I', 0 if hostile else 1) + b'\xc2\x04\x00'
+            self.uc.mem_write(address, code)
+            self.uc.ctl_remove_cache(address, address + 32)
+            self.word(target_vtable + 4, address)
+            self.word(HEAP + 0x5100 + 19 * 16 + 4, self.accessor(22, 2))
+            # Mark localized diagnostic strings initialized; no diagnostic output requested.
+            for offset in [0x69d0, 0x69e8, 0x6a00, 0x69a0, 0x69b8, 0x6970,
+                           0x6988, 0x6910, 0x6928, 0x6898, 0x68f8, 0x68e0,
+                           0x68c8, 0x6940, 0x6958]:
+                self.uc.mem_write(0xaa0000 + offset, b'\x01')
+            source = 0 if caster == 'none' else CREATURE + 0x98
+            dest = TARGET + 0x98
+            calls = [(0x1b3540, (0x98, dest, 0)),
+                     (0x1b3a10, (0x98, source, dest, 0)),
+                     (0x1b4770, (source, 0x98, dest, 0)),
+                     (0x1b5750, (source, 0x98, dest, 0))]
+            try:
+                result = []
+                for rva, args in calls:
+                    try:
+                        result.append(str(int(self.call(rva, args, callee_pop=False)) & 0xff))
+                    except Exception as error:
+                        raise RuntimeError(f'immunity RVA {rva:x}: {v}') from error
+                return ' '.join(result)
+            finally:
+                self.effect_mode = False
         if kind == 'effectiveness':
             eligible, resisted, between, same, bypass, generic, specific_r, generic_r = map(int, v)
             self.effect_mode = True
@@ -330,6 +383,25 @@ class Original:
 
 
 def corpus():
+    def ids(items):
+        return ','.join(map(str, items)) or '-'
+    immunity_flags = [0, 0x8000, 0x400, 0x4000, 0x10, 0x20, 2, 0x200000,
+                      0x800000, 0x2000, 0x1000000, 0x3ffffff]
+    # All subsets of the relevant target abilities at the two flag extremes.
+    for bits, flags, caster in itertools.product(range(512), [0, 0x3ffffff], ['-', '45']):
+        target = ids(a for i, a in enumerate([0x3f, 0x26, 0x15, 0x0d, 3, 0x2a, 0x4d, 0x11, 5]) if bits & (1 << i))
+        yield f'immunity {flags} {caster} {target} - 1 0 100'
+    for flags, target, effects, caster in itertools.product(
+            immunity_flags, ['-', '63', '38', '21', '13', '3', '42', '77', '17', '5'],
+            ['-', '137', '3', '40', '20', '137,3,40,20'], ['none', '-', '45', '82', '45,82']):
+        yield f'immunity {flags} {caster} {target} {effects} 1 0 100'
+    # Resistance gate: missing caster, non-hostile versus same-side, 0x52 vs 0x26.
+    for flags, caster, target, hostile, same, resistance in itertools.product(
+            [0, 0x800000, 0x2000, 0x1000000, 0x1802000],
+            ['none', '-', '82'], ['-', '38', '63', '38,63'], [0, 1], [0, 1],
+            [-1, 0, 99, 100, 101, 2147483647]):
+        yield f'immunity {flags} {caster} {target} - {hostile} {same} {resistance}'
+
     for flags in itertools.product([0, 1], repeat=6):
         for specific, generic in [(0, 0), (25, 75), (100, 0), (-10, 120), (2147483647, -2147483648)]:
             yield 'effectiveness ' + ' '.join(map(str, (*flags, specific, generic)))
@@ -428,7 +500,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--exe', type=Path, required=True)
     parser.add_argument('--report', type=Path, default=ROOT / 'target/testbench-report.json')
-    parser.add_argument('--only', choices=['global', 'combat', 'dice', 'ratio', 'final', 'modify', 'ability42', 'attack', 'effectiveness'])
+    parser.add_argument('--only', choices=['global', 'combat', 'dice', 'ratio', 'final', 'modify', 'ability42', 'attack', 'effectiveness', 'immunity'])
     args = parser.parse_args()
     original = Original(args.exe)
     cases = [case for case in corpus() if args.only is None or case.split()[0] == args.only]
@@ -443,7 +515,7 @@ def main():
         if index % 32 == 0:
             print(f"checking {index + 1}/{len(cases)}", flush=True)
         exe = original.evaluate(case)
-        if case.startswith(('combat ', 'dice ', 'modify ', 'ability42 ', 'attack ', 'effectiveness ')):
+        if case.startswith(('combat ', 'dice ', 'modify ', 'ability42 ', 'attack ', 'effectiveness ', 'immunity ')):
             vectors.append(dict(input=case, exe=exe))
         if exe != rust:
             failures.append(dict(input=case, exe=exe, rust=rust))
