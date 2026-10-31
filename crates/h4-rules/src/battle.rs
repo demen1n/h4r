@@ -12,6 +12,9 @@
 //!   aren't struck back; every melee hit is struck back once if the target survives;
 //! - no luck, no abilities, no spells; heroes don't fight, and a side with no creatures
 //!   left has lost even if it still has heroes;
+//! - in particular ability 0x42 (HP-based bonus damage through effect 0x98, see
+//!   `damage::finalize_attack_damage`) never fires: deciding whether the effect may touch
+//!   the target needs spell rules we don't have yet, so `HitOptions::ability_42` stays `None`;
 //! - the winner's heroes each get the experience of every enemy creature killed.
 
 use h4_state::army::{Army, ArmyId, Slot, SLOTS};
@@ -300,7 +303,10 @@ fn hit(
     let a = fighters[from].as_attacker();
     let d = fighters[to].as_defender();
     let mut steps: Vec<DamageEvent> = Vec::new();
-    let damage = damage::attack_hit(&a, &d, &HitOptions { ranged, ..HitOptions::default() }, dice, &mut steps);
+    // No luck and no ability 0x42 here (see the module notes): only `ranged` differs
+    // from the defaults.
+    let options = HitOptions { ranged, ..HitOptions::default() };
+    let damage = damage::attack_hit(&a, &d, &options, dice, &mut steps);
     let killed = fighters[to].take(damage);
     let (side, slot, target) = (fighters[from].side, fighters[from].slot, fighters[to].slot);
     log.push(BattleEvent::Hit { side, slot, target, ranged, retaliation, damage, killed });
