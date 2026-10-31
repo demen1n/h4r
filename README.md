@@ -177,4 +177,6 @@ The project is still establishing its foundations. Useful contributions include 
 
 Do not submit original game assets, executables, or decompiler output. Tests should use synthetic data or read game files from a local installation.
 
-The license choice is **not finalized**. Cargo metadata currently lists MIT, but the repository does not yet contain a standalone license file. Licensing will be resolved before public release.
+h4r's original source code and documentation are licensed under the **GNU General Public License, version 3 only** (`GPL-3.0-only`). See [LICENSE](LICENSE) for the full text and [LICENSING.md](LICENSING.md) for scope and provenance notes.
+
+Dependencies retain their own licenses; see the [dependency inventory](THIRD_PARTY.md). The original game's code, assets, and trademarks are not licensed by this project.
