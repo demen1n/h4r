@@ -17,6 +17,7 @@
 
 pub mod artifacts;
 pub mod battle;
+pub mod battlefield;
 pub mod creatures;
 pub mod damage;
 pub mod effects;
