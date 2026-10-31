@@ -18,6 +18,19 @@ pub struct BattlefieldPreset {
 }
 
 impl BattlefieldPreset {
+    /// Cell center in the preset's 1180x1024 coordinate system (RVA 34db00).
+    pub fn cell_center(x: usize, y: usize) -> Option<(i32, i32)> {
+        if x >= 102 || y >= 102 { return None; }
+        let (x, y) = (x as i32, y as i32);
+        Some((590 + (y - x) * 16, 512 + (x + y - 102) * 8))
+    }
+
+    /// Raw value at a packed map coordinate; absent outside stored row bounds.
+    pub fn cell(&self, x: usize, y: usize) -> Option<u8> {
+        let row = self.rows.get(x)?;
+        row.cells.get(y.checked_sub(row.start)?).copied()
+    }
+
     pub fn read(data: &[u8]) -> Result<Self> {
         let mut r = Reader::new(data);
         let header = [r.u32()?, r.u32()?, r.u32()?, r.u32()?, r.u32()?, r.u32()?];
@@ -70,6 +83,27 @@ mod tests {
         data.extend((0..4838).map(|i| (i % 251) as u8));
         data.extend_from_slice(&0_u16.to_le_bytes());
         data
+    }
+
+    #[test]
+    fn map_coordinates_match_the_centered_isometric_rectangle() {
+        assert_eq!(BattlefieldPreset::cell_center(51, 51), Some((590, 512)));
+        assert_eq!(BattlefieldPreset::cell_center(50, 51), Some((606, 504)));
+        assert_eq!(BattlefieldPreset::cell_center(51, 50), Some((574, 504)));
+        assert_eq!(BattlefieldPreset::cell_center(102, 0), None);
+        let field = BattlefieldPreset::read(&fixture()).unwrap();
+        assert_eq!(field.cell(0, 36), None);
+        assert_eq!(field.cell(0, 37), Some((4837 % 251) as u8));
+        assert_eq!(field.cell(0, 38), None);
+        assert_eq!(field.cell(usize::MAX, 0), None);
+        for (x, row) in field.rows.iter().enumerate() {
+            for y in row.start..row.start + row.cells.len() {
+                let (sx, sy) = BattlefieldPreset::cell_center(x, y).unwrap();
+                // Edge cells can straddle the image boundary.
+                assert!((-16..1196).contains(&sx));
+                assert!((-8..1032).contains(&sy));
+            }
+        }
     }
 
     #[test]
