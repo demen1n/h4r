@@ -10,6 +10,31 @@ The goal is to preserve the original rules and appearance. Convenience features 
 
 **This is an early development prototype. It cannot play a complete game yet.**
 
+![A standalone map from the original game rendered by h4r: roads, terrain transitions, elevation, objects, and a hero](docs/screenshots/adventure-map.jpg)
+
+<details>
+<summary>Another map</summary>
+
+![A town by the water, treasure, and a mounted hero on another original map](docs/screenshots/adventure-map-town.jpg)
+
+</details>
+
+The screenshots show original game data rendered by h4r. The data is read from a local installation and is not part of this repository.
+
+### Status
+
+| Area | State |
+| --- | --- |
+| Archives, sprites, animations, terrain | ✅ Read and decoded |
+| Original maps (`.h4c`) | ✅ All 106 in the reference installation are read; scripts are not executed |
+| Adventure map rendering | 🟡 Terrain, roads, elevation, objects, and armies; not yet compared pixel-for-pixel with the original |
+| Movement and turns | 🟡 Movement costs, paths, new days, and neutral growth; no ships, skills, or weeks/months |
+| Combat | 🔴 Automatic placeholder with the original damage formula; no battlefield |
+| Towns, adventure objects, heroes | 🔴 Not yet: objects are shown but cannot be visited |
+| AI, saves, sound, campaigns | 🔴 Not yet |
+
+Current focus: verifying recovered rules against the original executable and moving from the placeholder to a real battle.
+
 **Help is welcome.** Code review, reverse engineering, testing, documentation, and knowledge of Heroes IV all help move the project forward. See [Contributing](#contributing).
 
 ## Why
