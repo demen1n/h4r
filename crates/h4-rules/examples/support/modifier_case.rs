@@ -1,6 +1,20 @@
-//! Shared line-protocol adapter for the exe bench and its golden-vector tests.
+//! Turns a `modify` request of the exe bench into our damage types.
+//!
+//! Shared by `examples/exe_reference.rs` (live comparison with the exe) and the
+//! golden-vector tests, so both read a request the same way.
 use h4_rules::damage::*;
 
+/// Reads the 15 modifier fields, in this order:
+/// `base offense reduction defense bonus school attacker-abilities defender-abilities
+/// ward-mask giant giant-effect ranged moved luck luck-strength`.
+///
+/// - ability lists are comma-separated decimal ids, `-` for none;
+/// - `school` is an index into the game's order (life, order, death, chaos, nature, might);
+/// - `ward-mask` bit i = warded against school i (by a spell);
+/// - `luck`: 0 normal, 1 good, 2 bad; `luck-strength` is an index into `LUCK_MULTIPLIERS`.
+///
+/// Fields the request doesn't set (ids, stack size, HP) get neutral values; the target's
+/// HP is huge so the final HP limit never interferes with a modifier test.
 pub fn parse(
     v: &[&str],
 ) -> Result<(i32, Attacker, Defender, HitOptions), Box<dyn std::error::Error>> {
@@ -74,6 +88,7 @@ pub fn parse(
     ))
 }
 
+/// Answers a `modify` request: the damage after all modifiers.
 pub fn evaluate(v: &[&str]) -> Result<i32, Box<dyn std::error::Error>> {
     let (base, a, d, options) = parse(v)?;
     Ok(modify_damage(

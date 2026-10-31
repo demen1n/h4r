@@ -1,6 +1,23 @@
-//! Shared original-exe finalization/attack fixture adapter.
+//! Turns `ability42` and `attack` requests of the exe bench into our damage calls.
+//!
+//! Shared by `examples/exe_reference.rs` and `tests/attack_vectors.rs`.
 use h4_rules::{damage::*, random::CombatRandom};
 
+/// Answers one request.
+///
+/// - `ability42 <15 modifier fields> <10 finalization fields>` — only the last step of a
+///   hit ([`finalize_attack_damage`]); the first modifier field (`base`) is the damage that
+///   goes in. Answer: one number.
+/// - `attack <seed modulus low high hits> <15 modifier fields> <10 finalization fields>` —
+///   `hits` whole hits ([`attack_hit`]) on one generator, then one more roll to show how
+///   many numbers the hits used up. Answer: `hits + 1` numbers.
+///
+/// Modifier fields: see `modifier_case::parse`. Finalization fields, in order:
+/// `number hp dealt unit-hp creature eligible effectiveness power excluded block` —
+/// attacker stack size, target's remaining HP, damage already dealt, HP of one target
+/// creature, then the [`Ability42Target`] answers (`creature`, `eligible` are 0/1),
+/// `excluded` = bit mask of target immunities (1 undead, 2 ability 0x2a, 4 elemental),
+/// `block` 0/1.
 pub fn evaluate(kind: &str, mut fields: &[&str]) -> Result<Vec<i32>, Box<dyn std::error::Error>> {
     let prefix: Vec<u32> = if kind == "attack" {
         let p = fields[..5]
@@ -53,6 +70,7 @@ pub fn evaluate(kind: &str, mut fields: &[&str]) -> Result<Vec<i32>, Box<dyn std
     let [seed, modulus, low, high, hits] = prefix[..] else {
         return Err("invalid attack prefix".into());
     };
+    // Same ids as the bench gives the original objects; they key the dice rolls.
     a.id = 3;
     d.id = if *creature == "1" { 7 } else { 0 };
     a.damage_low = low as i32;
