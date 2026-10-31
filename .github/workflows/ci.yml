@@ -53,3 +53,26 @@ jobs:
 
       - name: Run tests with skip messages visible
         run: cargo "+$RUST_TOOLCHAIN" test --workspace --locked -- --nocapture
+
+  clippy:
+    # Rust's linter. Lints don't depend on the OS here, so one runner is enough.
+    # `-D warnings` turns every warning into an error: a new warning fails the check.
+    # A lint that makes code worse is allowed locally with `#[allow(...)]` and a reason.
+    name: Clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_TOOLCHAIN: "1.99.1"
+
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install the development Rust toolchain with Clippy
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component clippy --no-self-update
+
+      - name: Run Clippy on all workspace targets
+        run: cargo "+$RUST_TOOLCHAIN" clippy --workspace --all-targets --locked -- -D warnings
