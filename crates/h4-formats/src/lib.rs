@@ -1,6 +1,7 @@
 //! Readers for Heroes of Might and Magic IV data files.
 //!
 //! - [`adv_actor`]: adventure map animation definitions (speeds, walk lengths).
+//! - [`combat_actor`]: combat animation definitions, explicit directions and frame rates.
 //! - [`archive`]: `.h4r` resource archives and the game's archive priority order.
 //! - [`sprite`]: paletted sprite layers (`t_bitmap_layer_24`), bitmap groups and actor sequences.
 //! - [`catalog`]: actors and their animations by action and direction.
@@ -15,6 +16,7 @@ pub mod adv_actor;
 pub mod adv_object;
 pub mod archive;
 pub mod catalog;
+pub mod combat_actor;
 pub mod cp1251;
 pub mod map;
 pub mod map_army;

@@ -5,3 +5,5 @@
 /extracted
 /third_party
 /.claude/worktrees
+# Local reverse-engineering output; keep research notes in version control.
+/decomp/*.c

@@ -1,12 +1,13 @@
 //! Browse and play actor animations from the original game files.
 //!
-//! usage: h4-viewer [data dir]
+//! usage: h4-viewer [data dir] [--combat]
 //! keys: ←/→ actor, ↑/↓ action, Q/E rotate, Space pause, ,/. step, [/] speed, -/= zoom, S shadow
 
 use std::collections::BTreeMap;
 
 use h4_formats::archive::Resources;
 use h4_formats::catalog::{self, Actor};
+use h4_formats::combat_actor::CombatActorModel;
 use h4_formats::sprite::ActorSequence;
 use macroquad::prelude::*;
 
@@ -19,6 +20,7 @@ struct Loaded {
 struct Viewer {
     res: Resources,
     actors: Vec<Actor>,
+    combat_models: BTreeMap<String, CombatActorModel>,
     actor: usize,
     action: usize,
     direction: usize,
@@ -38,7 +40,11 @@ impl Viewer {
     }
 
     fn action_name(&self) -> String {
-        self.actor().action_names().get(self.action).map(|s| s.to_string()).unwrap_or_default()
+        self.actor()
+            .action_names()
+            .get(self.action)
+            .map(|s| s.to_string())
+            .unwrap_or_default()
     }
 
     fn direction_name(&self) -> &'static str {
@@ -53,6 +59,12 @@ impl Viewer {
         self.error = None;
         let action = self.action_name();
         let dir = self.direction_name();
+        if let Some(model) = self.combat_models.get(&self.actor().name) {
+            if let Some(definition) = model.action(&action) {
+                // File timing is the default; [ and ] still allow manual inspection.
+                self.fps = f32::from(definition.frames_per_second.max(1));
+            }
+        }
         let Some(name) = self.actor().actions.get(&action).and_then(|d| d.get(dir)).cloned() else {
             return;
         };
@@ -72,7 +84,11 @@ impl Viewer {
                 t
             })
             .collect();
-        self.loaded = Some(Loaded { frames, size: vec2(w as f32, h as f32), shadows: seq.shadows.len() });
+        self.loaded = Some(Loaded {
+            frames,
+            size: vec2(w as f32, h as f32),
+            shadows: seq.shadows.len(),
+        });
     }
 
     fn handle_keys(&mut self) {
@@ -146,13 +162,32 @@ impl Viewer {
             if let Some(t) = l.frames.get(self.frame) {
                 let size = l.size * self.zoom;
                 let pos = vec2(screen_width(), screen_height()) / 2.0 - size / 2.0;
-                draw_texture_ex(t, pos.x, pos.y, WHITE, DrawTextureParams { dest_size: Some(size), ..Default::default() });
+                draw_texture_ex(
+                    t,
+                    pos.x,
+                    pos.y,
+                    WHITE,
+                    DrawTextureParams {
+                        dest_size: Some(size),
+                        ..Default::default()
+                    },
+                );
             }
         }
         let a = self.actor();
         let frames = self.loaded.as_ref().map_or(0, |l| l.frames.len());
         let lines = [
-            format!("{}  ({}/{})", a.name, self.actor + 1, self.actors.len()),
+            format!(
+                "{}  ({}/{}){}",
+                a.name,
+                self.actor + 1,
+                self.actors.len(),
+                if self.combat_models.is_empty() {
+                    ""
+                } else {
+                    "   combat definitions"
+                }
+            ),
             format!("{}  [{}]", self.action_name(), a.directions(&self.action_name()).join(" ")),
             format!(
                 "dir {}   frame {}/{}   {} fps   x{}{}{}",
@@ -170,7 +205,13 @@ impl Viewer {
             "<- -> actor   up/down action   Q/E rotate   space pause   , . step   [ ] speed   - = zoom   S shadow".into(),
         ];
         for (i, s) in lines.iter().enumerate() {
-            draw_text(s, 16.0, 28.0 + 24.0 * i as f32, if i == 3 { 18.0 } else { 26.0 }, if i == 3 { GRAY } else { WHITE });
+            draw_text(
+                s,
+                16.0,
+                28.0 + 24.0 * i as f32,
+                if i == 3 { 18.0 } else { 26.0 },
+                if i == 3 { GRAY } else { WHITE },
+            );
         }
         if let Some(e) = &self.error {
             draw_text(e, 16.0, screen_height() - 20.0, 22.0, RED);
@@ -179,12 +220,20 @@ impl Viewer {
 }
 
 fn window_conf() -> Conf {
-    Conf { window_title: "Heroes IV animation viewer".into(), window_width: 1100, window_height: 800, high_dpi: true, ..Default::default() }
+    Conf {
+        window_title: "Heroes IV animation viewer".into(),
+        window_width: 1100,
+        window_height: 800,
+        high_dpi: true,
+        ..Default::default()
+    }
 }
 
 #[macroquad::main(window_conf)]
 async fn main() {
-    let dir = h4_formats::archive::data_dir(std::env::args().nth(1));
+    let args: Vec<_> = std::env::args().skip(1).collect();
+    let combat = args.iter().any(|a| a == "--combat");
+    let dir = h4_formats::archive::data_dir(args.into_iter().find(|a| a != "--combat"));
     let res = match Resources::open(&dir) {
         Ok(r) => r,
         Err(e) => {
@@ -192,14 +241,42 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    let mut by_name: BTreeMap<String, Actor> = catalog::actors(&res);
+    let mut combat_models = BTreeMap::new();
+    let mut by_name: BTreeMap<String, Actor> = if combat {
+        let mut actors = BTreeMap::new();
+        let mut names: Vec<_> = res.names().filter(|n| n.to_lowercase().starts_with("combat_actor.")).collect();
+        names.sort();
+        for resource in names {
+            let model = match res.read(resource).and_then(|d| CombatActorModel::read(&d)) {
+                Ok(m) => m,
+                Err(e) => {
+                    eprintln!("{resource}: {e}");
+                    std::process::exit(1);
+                }
+            };
+            let name = resource["combat_actor.".len()..]
+                .strip_suffix(".h4d")
+                .unwrap_or(resource)
+                .to_string();
+            actors.insert(name.to_lowercase(), Actor::from_combat_model(name.clone(), &model));
+            combat_models.insert(name, model);
+        }
+        actors
+    } else {
+        catalog::actors(&res)
+    };
     by_name.retain(|_, a| !a.actions.is_empty());
     let actors: Vec<Actor> = by_name.into_values().collect();
+    if actors.is_empty() {
+        eprintln!("no actor animations found in {}", dir.display());
+        std::process::exit(1);
+    }
     let start = actors.iter().position(|a| a.name.eq_ignore_ascii_case("griffin")).unwrap_or(0);
 
     let mut v = Viewer {
         res,
         actors,
+        combat_models,
         actor: start,
         action: 0,
         direction: 2,
