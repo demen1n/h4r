@@ -12,7 +12,7 @@
 //!   aren't struck back; every melee hit is struck back once if the target survives;
 //! - no luck, no abilities, no spells; heroes don't fight, and a side with no creatures
 //!   left has lost even if it still has heroes;
-//! - in particular ability 0x42 (HP-based bonus damage through effect 0x98, see
+//! - in particular ability 0x42, stone gaze (HP-based bonus damage through effect 0x98, see
 //!   `damage::finalize_attack_damage`) never fires: deciding whether the effect may touch
 //!   the target needs spell rules we don't have yet, so `HitOptions::ability_42` stays `None`;
 //! - the winner's heroes each get the experience of every enemy creature killed.

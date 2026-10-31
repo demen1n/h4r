@@ -47,7 +47,7 @@ return modify_damage(sum, target, ranged, moved, luck)
 1. **charging** (0x0b), только melee, moved > 500: `dmg = (moved*10/350 + 85) * dmg / 100`.
 2. Если у цели слот `+0x40` истинен («великан»?): атакующий с 0x1c, или (ranged ? 0x35 : 0x2b)
    → `dmg *= 2`; иначе эффект заклинания 0x8c у атакующего → `dmg += dmg >> 1`.
-   Имена 0x1c (`insubstantial`) и 0x2b (`mechanical`) в нашем enum здесь не подходят.
+   0x1c — `giantslayer`, 0x2b — `melee_giantslayer`, 0x35 — `ranged_giantslayer`.
 3. **Удача**: множитель `m = {1.0, 1.25, 1.5, 2.0}[obj->[+0x60]]`, `obj = [this+0xa18]`
    (таблица double по VA 0x97cb68, rva 17b8f0). luck 1: `dmg = trunc(m * dmg)`,
    luck 2: `dmg = trunc(dmg / m)`.
@@ -73,8 +73,8 @@ clamp: сначала ratio < 0.05 (и NaN) → 0.05, потом ratio > 20 → 
 ## finalize_damage — FUN_005ee540 (rva 1ee540)
 
 cdecl: (attacker, number, target, already_dealt, dmg).
-- Атакующий со способностью 0x42 против живого `t_combat_creature` (не 0x4d undead, не 0x2a,
-  не 0x11 elemental): `x = (effectiveness_98 * target.vf90()) / 100` (если FUN_5b6140), и если
+- Атакующий со способностью 0x42 (`stone_gaze`, взгляд медузы) против `t_combat_creature`
+  (не 0x4d undead, не 0x2a mechanical, не 0x11 elemental): `x = (effectiveness_98 * target.vf90()) / 100` (если FUN_5b6140), и если
   `x * number >= 500` — `dmg += trunc(((x * number) * 0.001) * target.creature_hp)`.
   Важно: HP берутся у **цели** (`cast_target+0x98`, слот +0x30), не у атакующего.
   Полный разбор и границы сверки — в последнем разделе.
@@ -85,7 +85,7 @@ cdecl: (attacker, number, target, already_dealt, dmg).
 
 - Где решается удача атакующего (аргумент luck) и как настоящий удар собирает бросок,
   модификаторы и `finalize_damage` (`attack.cpp`).
-- Игровые названия слота `+0x40` цели, эффекта 0x8c и способности 0x42; поле `[+0x60]` для силы удачи.
+- Игровые названия слота `+0x40` цели и эффекта 0x8c; поле `[+0x60]` для силы удачи.
 - Структура `t_abstract_creature` (`+0x198`/`+0x408`/`+0x354` — что-то про полученный урон).
 - Сверка с известными формулами сообщества (Equilibris `equilibris.chm`, `Skill_Guide.pdf`).
 
@@ -154,9 +154,14 @@ base=6/offense=5/defense=6 → 4 вместо 5. Теперь внутренни
 
 Алгоритм финализации по дизассемблеру RVA `1ee540`:
 
-1. Атакующий имеет 0x42; цель не имеет 0x4d/0x2a/0x11. Название 0x2a
-   пока не подтверждено (перенесённый enum говорит magic_immunity), 0x42
-   ошибочно подписано stealth — используем численные обозначения.
+1. Атакующий имеет 0x42 (`stone_gaze`); цель не имеет 0x4d undead / 0x2a mechanical /
+   0x11 elemental. Имена — из таблицы ключевых слов exe (VA `0xa64160`, пары
+   `{i32 значение; char* имя}`; прежний `re/enum_creature_ability.tsv` читал её со
+   сдвигом и подписывал 0x42 как stealth, 0x2a как magic_immunity). Эффект 0x98 в таблице
+   заклинаний (VA `0x994f80`) — тоже `stone_gaze`; исключения совпадают с подсказкой
+   медузы в `table.creatures` («не действует на нежить, механизмы и элементалей»).
+   Имена `Ability42Target`, `HitOptions::ability_42` и запрос стенда `ability42`
+   пока оставлены численными.
 2. dynamic_cast цели к `t_combat_creature` успешен; effect 0x98 разрешён
    проверкой `1b6140` (это обёртка большой системы допустимости заклинаний).
 3. `1f1de0` даёт эффективность; слот +0x90 объекта по `target+0xa4` — силу.

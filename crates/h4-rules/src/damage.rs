@@ -16,12 +16,12 @@
 //! for positive numbers is `as i32` in Rust).
 //!
 //! Abilities are given by their number in the game's ability enum
-//! (`re/enum_creature_ability.tsv`), because the checks in the exe are by number and a few
-//! names in our enum table look doubtful (noted next to the constants).
+//! (`re/enum_creature_ability.tsv`, read from the exe's keyword table), because the checks
+//! in the exe are by number.
 
 use crate::random::CombatRandom;
 
-/// Ability numbers the damage code checks. The name is the one from our enum table.
+/// Ability numbers the damage code checks. The names are the game's keywords.
 pub mod ability {
     pub const BLOCK: u8 = 0x07;
     pub const BREATH_ATTACK: u8 = 0x09;
@@ -30,31 +30,27 @@ pub mod ability {
     pub const CHARGING: u8 = 0x0b;
     pub const COLD_ATTACK: u8 = 0x0c;
     pub const COLD_RESISTANCE: u8 = 0x0d;
-    /// Checked on the target as a ward against Death. Our enum table calls 0x10
-    /// `devouring` and puts `death_protection` at 0x0e — one of them is probably wrong.
-    pub const WARD_DEATH: u8 = 0x10;
+    /// Checked on the target as a ward against the Death school.
+    pub const DEATH_PROTECTION: u8 = 0x10;
     pub const FIRE_ATTACK: u8 = 0x14;
     pub const FIRE_RESISTANCE: u8 = 0x15;
-    /// Doubles damage against "giant" targets in melee and at range. The table says
-    /// `insubstantial`, which doesn't fit; likely a giantslayer variant.
-    pub const SLAYER_ANY: u8 = 0x1c;
+    /// Doubles damage against "giant" targets in melee and at range.
+    pub const GIANTSLAYER: u8 = 0x1c;
     pub const LIFE_PROTECTION: u8 = 0x22;
-    /// Doubles damage against "giant" targets in melee. The table says `mechanical`.
-    pub const SLAYER_MELEE: u8 = 0x2b;
-    /// Extra damage based on the target's hit points, after the checks of effect 0x98
-    /// (may the effect touch this target, how much of it is resisted). See
-    /// [`super::finalize_attack_damage`]. The transferred enum name `stealth` does not fit
-    /// the code, so we keep the numeric name until the real one is confirmed.
-    pub const ABILITY_42: u8 = 0x42;
-    /// The target is undead. One of the three abilities that make a target immune to
-    /// [`ABILITY_42`]; the name is confirmed by the combat damage code.
+    /// Doubles damage against "giant" targets in melee.
+    pub const MELEE_GIANTSLAYER: u8 = 0x2b;
+    /// Medusa's stone gaze: extra damage based on the target's hit points, after the
+    /// checks of effect 0x98 (the spell `stone_gaze`: may it touch this target, how much of
+    /// it is resisted). See [`super::finalize_attack_damage`].
+    pub const STONE_GAZE: u8 = 0x42;
+    /// The target is undead: immune to [`STONE_GAZE`].
     pub const UNDEAD: u8 = 0x4d;
-    /// Another ability that makes a target immune to [`ABILITY_42`]. The transferred enum
-    /// says `magic_immunity` (not verified), hence the numeric name.
-    pub const ABILITY_2A: u8 = 0x2a;
-    /// The target is an elemental: the third immunity to [`ABILITY_42`]. Name confirmed by
-    /// the combat damage code (as for [`UNDEAD`]).
+    /// The target is mechanical: immune to [`STONE_GAZE`].
+    pub const MECHANICAL: u8 = 0x2a;
+    /// The target is an elemental: immune to [`STONE_GAZE`].
     pub const ELEMENTAL: u8 = 0x11;
+    // The three immunities match Medusa's help text in `table.creatures`: the gaze
+    // "does not work on undead, mechanical creatures and elementals".
     pub const RANGED: u8 = 0x33;
     pub const RANGED_GIANTSLAYER: u8 = 0x35;
     pub const LARGE_AREA_EFFECT: u8 = 0x53;
@@ -200,11 +196,11 @@ pub fn modify_damage(
 
     // Giant slaying: double damage, or +50% from the spell effect.
     if defender.giant {
-        let slayer = attacker.has(ability::SLAYER_ANY)
+        let slayer = attacker.has(ability::GIANTSLAYER)
             || if ranged {
                 attacker.has(ability::RANGED_GIANTSLAYER)
             } else {
-                attacker.has(ability::SLAYER_MELEE)
+                attacker.has(ability::MELEE_GIANTSLAYER)
             };
         if slayer {
             damage *= 2;
@@ -295,7 +291,7 @@ fn is_warded(school: School, defender: &Defender) -> bool {
     let by_spell = defender.warded_against.contains(&school);
     let by_ability = match school {
         School::Life => defender.has(ability::LIFE_PROTECTION),
-        School::Death => defender.has(ability::WARD_DEATH),
+        School::Death => defender.has(ability::DEATH_PROTECTION),
         School::Chaos => defender.has(ability::CHAOS_PROTECTION),
         School::Order | School::Nature | School::Might => false,
     };
@@ -303,7 +299,7 @@ fn is_warded(school: School, defender: &Defender) -> bool {
     school != School::Might && (by_spell || by_ability)
 }
 
-/// What ability 0x42 needs to know about its target that only other game rules can say.
+/// What ability 0x42 (stone gaze) needs to know about its target that only other game rules can say.
 ///
 /// In the game these come from the type of the target and from the spell rules for effect
 /// 0x98 (who it can touch, how much is resisted). We don't have those rules yet, so instead
@@ -326,8 +322,8 @@ pub struct Ability42Target {
 /// The whole last step of a hit (rva `1ee540`): ability 0x42's bonus, then the limits of
 /// [`finalize_damage`] (remaining hit points, then block).
 ///
-/// Bonus of ability 0x42, if the attacker has it, the target is none of undead / 0x2a /
-/// elemental, and `effect` says the target is a creature the effect can touch:
+/// Bonus of ability 0x42 (stone gaze), if the attacker has it, the target is none of
+/// undead / mechanical / elemental, and `effect` says the target is a creature the effect can touch:
 /// `power = effectiveness% * power% / 100`; if `power * number >= 500` (number = attacker's
 /// stack size), add `power * number / 1000 * hit points of one target creature`, rounded
 /// toward zero. `effect: None` means "unknown" and gives no bonus.
@@ -340,10 +336,10 @@ pub fn finalize_attack_damage(
     log: &mut Vec<DamageEvent>,
 ) -> i32 {
     let mut damage = damage;
-    let immune = [ability::UNDEAD, ability::ABILITY_2A, ability::ELEMENTAL]
+    let immune = [ability::UNDEAD, ability::MECHANICAL, ability::ELEMENTAL]
         .iter()
         .any(|&a| defender.has(a));
-    if attacker.has(ability::ABILITY_42) && !immune {
+    if attacker.has(ability::STONE_GAZE) && !immune {
         if let Some(target) = effect.filter(|t| t.is_creature && t.can_affect) {
             // The game multiplies 32-bit integers and lets them overflow; `wrapping_*`
             // does the same instead of panicking in a debug build.
@@ -601,7 +597,7 @@ mod tests {
         let mut giant = target();
         giant.giant = true;
         let mut slayer = orc();
-        slayer.abilities = vec![ability::SLAYER_MELEE];
+        slayer.abilities = vec![ability::MELEE_GIANTSLAYER];
         assert_eq!(modify(10, &slayer, &giant), 20);
         slayer.abilities = vec![];
         slayer.giant_bonus_effect = true;
@@ -622,7 +618,7 @@ mod tests {
     #[test]
     fn ability_42_uses_target_hp_then_limits_and_block() {
         let mut a = orc();
-        a.abilities.push(ability::ABILITY_42);
+        a.abilities.push(ability::STONE_GAZE);
         let mut d = target();
         d.total_hit_points = 30;
         d.abilities.push(ability::BLOCK);
