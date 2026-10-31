@@ -21,7 +21,7 @@ calling game functions: x87 uses 53-bit precision, as selected at exe startup
 `0x023f` (53-bit precision, nearest rounding, masked exceptions), which is checked
 and recorded in the report. Skipping this initialization produces misleading differences.
 
-The deterministic corpus has 1,857 requests:
+The deterministic corpus has 2,945 requests:
 
 - 8 seeds × 256 consecutive global RNG outputs (RVA `36a70`), including unsigned
   overflow and the high bit; 2,048 individual numbers.
@@ -44,6 +44,13 @@ The deterministic corpus has 1,857 requests:
   clamps and zero damage, 625 integer-boundary cases and 128 deterministic
   mixed-effect cases.
 
+- 912 ability-0x42 finalization cases (RVA `1ee540`): threshold, effectiveness
+  truncation, target creature HP, all excluded abilities and combinations,
+  non-creature targets, effect eligibility, HP caps, already dealt damage, block.
+- 176 connected numerical attack sequences: three original `1ee240` calls
+  (executing real `1edf30`), each followed by `1ee540` on the same fixture
+  objects/RNG, plus the next RNG output. Includes melee/ranged and combined effects.
+
 Virtual accessors are tiny fixture stubs returning supplied values. The actual
 RNG, arithmetic, branches, limits and rounding execute from the original image.
 Calls have a 30-second execution timeout and a stack-balance check. Modified accessor
@@ -63,11 +70,11 @@ chain. Creature low/high damage and IDs are fixture values.
 
 The report defaults to `target/testbench-report.json`, records the executable
 hash, Unicorn version and x87 control word, and contains every mismatch with its input and both
-answers. It also stores the original answers for combat/dice/modifier cases in
+answers. It also stores the original answers for combat/dice/modifier/finalization/attack cases in
 `vectors`. Differences cause exit status 1; unsupported images or execution errors
 also fail the command. `--report PATH` selects another destination.
 
-Verified on 31 October 2026: 1,857 requests, zero differences. The first run exposed
+Verified on 31 October 2026: 2,945 requests, zero differences. The first run exposed
 two one-ULP differences in the Rust damage coefficient: the original keeps the
 denominator in x87 precision. The fix has a normal Rust regression test.
 
@@ -90,11 +97,30 @@ attack 5, defense 6: 4 instead of the original 5). `damage_modifier` still retur
 internal calculation. A minimal unit test and all 1,321 original answers in
 `tests/modifier_vectors.tsv` prevent regression.
 
-Use `--only modify` (or `global`, `combat`, `dice`, `ratio`, `final`) for a focused
+Use `--only modify` (or `global`, `combat`, `dice`, `ratio`, `final`, `ability42`, `attack`) for a focused
 run; it applies the same CRT initialization. A focused report contains only those
 cases and replaces the selected report file.
 
-Scope still to add: finalization ability `0x42`, a connected full attack, and real
-creature/battlefield objects.
+Ability 0x42 is now implemented and verified via `finalize_attack_damage`.
+Its bonus uses **target creature HP**, not attacker HP: after eligibility and
+excluded-target checks, scale effect power by effectiveness, require power ×
+attacker count >= 500, add the HP-based bonus, then cap and block.
+The numerical pipeline is `attack_hit`; the battle stand-in now uses it.
+New original answers are in `tests/attack_vectors.tsv` (912 finalization + 176
+attack sequences), including a separate event-order unit test.
+
+These fixtures supply dynamic-cast success and the result of the effect-0x98
+eligibility check (`1b6140`). The full spell-targeting subsystem is not replaced
+by guessed Rust rules: `Ability42Target` explicitly takes resolved eligibility
+and effectiveness. The native `1f1de0` resistance helper executes with a supplied
+resisted flag and virtual resistance; resistance-bypass abilities 0x52/0x1f are
+not part of this fixture. No arithmetic under test is stubbed.
+
+Connected attacks compose two original functions on shared fixture state; they
+do not run the full battlefield attack dispatcher or apply deaths/retaliation.
+Target HP and already-dealt inputs stay fixed over each three-hit sequence so
+that RNG progression and the numerical chain can be compared independently.
+Scope still to add: spell-targeting/immunity rules, real creature/battlefield
+objects, ranged penalties, luck selection, and full attack side effects.
 This is a function-level bench, not a replay or proof that full battles match.
 The ordinary cross-platform CI does not require Unicorn or an original exe.

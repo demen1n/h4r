@@ -18,7 +18,7 @@ use h4_state::army::{Army, ArmyId, Slot, SLOTS};
 use h4_state::GameState;
 
 use crate::creatures::{CreatureStats, TOWN_TYPES};
-use crate::damage::{self, Attacker, DamageEvent, Defender, Luck, School, LUCK_MULTIPLIERS};
+use crate::damage::{self, Attacker, DamageEvent, Defender, HitOptions, School};
 use crate::random::{CombatRandom, GlobalRandom};
 
 /// The two sides. The attacker is the army that stepped onto the other.
@@ -300,13 +300,7 @@ fn hit(
     let a = fighters[from].as_attacker();
     let d = fighters[to].as_defender();
     let mut steps: Vec<DamageEvent> = Vec::new();
-    let damage = if ranged {
-        let base = damage::roll_base_damage(&a, d.id, dice);
-        let modified = damage::modify_damage(base, &a, &d, true, 0, Luck::Normal, LUCK_MULTIPLIERS[0], &mut steps);
-        damage::finalize_damage(modified, &d, 0, &mut steps)
-    } else {
-        damage::melee_hit(&a, &d, 0, Luck::Normal, LUCK_MULTIPLIERS[0], dice, &mut steps)
-    };
+    let damage = damage::attack_hit(&a, &d, &HitOptions { ranged, ..HitOptions::default() }, dice, &mut steps);
     let killed = fighters[to].take(damage);
     let (side, slot, target) = (fighters[from].side, fighters[from].slot, fighters[to].slot);
     log.push(BattleEvent::Hit { side, slot, target, ranged, retaliation, damage, killed });

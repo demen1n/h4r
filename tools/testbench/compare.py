@@ -46,9 +46,10 @@ class Original:
         self.arena_next = ARENA
         # Only platform services and fixture boundaries are intercepted. The original
         # map, vector, key comparison, counters and checkpoint arithmetic all execute.
-        for address in [0x8d98b0, 0x8dbda0, 0x8df945, 0x8df9e1, 0x8ed444, 0x5edf30]:
+        for address in [0x8d98b0, 0x8dbda0, 0x8df945, 0x8df9e1, 0x8ed444, 0x5edf30, 0x5b6140, 0x8643a0]:
             self.uc.hook_add(UC_HOOK_CODE, self.service, begin=address, end=address)
         self.dice_mode = False
+        self.effect_mode = False
         # Virtual accessors return supplied fixture values. Arithmetic stays in exe code.
         self.uc.mem_write(STOP, b'\xd9\x1d' + struct.pack('<I', HEAP + 0xe000))  # fstp float
         self.uc.mem_write(HEAP, struct.pack('<I', HEAP + 0x1000))
@@ -77,11 +78,21 @@ class Original:
         elif address in (0x8dbda0, 0x8df945, 0x8df9e1):
             pass  # delete / single-threaded CRT lock / unlock
         elif address == 0x8ed444:
-            if not self.dice_mode:
-                raise RuntimeError('unexpected dynamic_cast outside dice fixture')
+            if not (self.dice_mode or self.effect_mode):
+                raise RuntimeError('unexpected dynamic_cast outside fixture')
             if self.read_word(sp + 4) != TARGET:
                 raise RuntimeError('unexpected dynamic_cast input')
-            uc.reg_write(UC_X86_REG_EAX, TARGET)
+            uc.reg_write(UC_X86_REG_EAX, TARGET if not self.effect_mode or self.target_is_creature else 0)
+        elif address == 0x5b6140:
+            if not self.effect_mode:
+                raise RuntimeError('unexpected effect eligibility call')
+            if [self.read_word(sp + i) for i in (4, 8, 12)] != [CREATURE, 0x98, TARGET]:
+                raise RuntimeError('unexpected effect eligibility arguments')
+            uc.reg_write(UC_X86_REG_EAX, int(self.effect_can_affect))
+        elif address == 0x8643a0:
+            if not self.effect_mode or self.read_word(sp + 4) != 0x98:
+                raise RuntimeError('unexpected spell record lookup')
+            uc.reg_write(UC_X86_REG_EAX, HEAP + 0xd000)
         elif address == 0x5edf30:
             if not self.dice_mode:
                 return  # execute the real modifier chain
@@ -126,7 +137,7 @@ class Original:
         self.uc.ctl_remove_cache(address, address + 32)
         return address
 
-    def modify(self, v):
+    def modify(self, v, setup_only=False):
         (base, offense, reduction, defense, bonus, school, abilities, resistances,
          wards, giant, effect, ranged, moved, luck, strength) = v
         abilities = [] if abilities == '-' else list(map(int, abilities.split(',')))
@@ -154,7 +165,72 @@ class Original:
         self.word(TARGET + 0x300, HEAP + 0x1c00)
         self.word(HEAP + 0x1c00 + 4, self.accessor(12, float(bonus), floating=True))
         self.word(HEAP + 0x1c00 + 8, self.accessor(13, float(defense), floating=True))
+        if setup_only:
+            return
         return self.call(0x1edf30, (int(base) & 0xffffffff, TARGET, int(ranged), int(moved) & 0xffffffff, int(luck)), this=CREATURE)
+
+    def final_setup(self, v):
+        # number, target HP, already dealt, creature HP, type, eligibility,
+        # resolved effectiveness, target virtual power, excluded abilities, block
+        number, hp, dealt, unit_hp, creature, eligible, effectiveness, power, excluded, block = map(int, v)
+        self.target_is_creature = bool(creature)
+        self.effect_can_affect = bool(eligible)
+        self.word(CREATURE + 0xb0, number)
+        self.word(TARGET + 0x98, HEAP + 0x1d00)
+        self.word(TARGET + 0xa4, HEAP + 0x1e00)
+        self.word(HEAP + 0x1e00, HEAP + 0x1f00)
+        self.word(HEAP + 0x1f00 + 0x90, self.accessor(14, power, pop=0))
+        self.word(HEAP + 0x1d00 + 0x30, self.accessor(15, unit_hp, pop=0))
+        self.word(HEAP + 0x1d00 + 0x7c, self.accessor(16, 100 - effectiveness))
+        self.word(HEAP + 0x1500 + 0x2c, self.accessor(17, hp, pop=8))
+        # Explicit effect-98 flags: resisted; native effectiveness helper executes.
+        self.word(HEAP + 0xd000 + 0x3c, 0x800000)
+        return number, dealt, excluded, block
+
+    def final_call(self, damage, number, dealt):
+        return self.call(0x1ee540, (CREATURE, number, TARGET, dealt, int(damage)), callee_pop=False)
+
+    def complete(self, kind, v):
+        # Final fixtures: modifier fields (15), finalization fields (10).
+        # Attack fixtures additionally prefix seed, modulus, low, high, hit count.
+        if kind == 'attack':
+            seed, modulus, low, high, hits = map(int, v[:5])
+            v = v[5:]
+            self.combat_start(seed, modulus)
+        else:
+            hits = 1
+        modifiers, final = v[:15], v[15:]
+        self.modify(modifiers, setup_only=True)
+        number, dealt, excluded, block = self.final_setup(final)
+        abilities = [] if modifiers[6] == '-' else list(map(int, modifiers[6].split(',')))
+        # At this fixture boundary eligibility/resistance are already resolved;
+        # bypass-resistance abilities are deliberately not supplied.
+        if any(a in abilities for a in (0x52, 0x1f)):
+            raise RuntimeError('unsupported resistance-bypass fixture')
+        resistances = [] if modifiers[7] == '-' else list(map(int, modifiers[7].split(',')))
+        resistances += [a for i, a in enumerate([0x4d, 0x2a, 0x11]) if excluded & (1 << i)]
+        if block:
+            resistances.append(7)
+        self.word(HEAP + 0x1500 + 0x30, self.lookup(2, resistances))
+        self.effect_mode = True
+        try:
+            result = []
+            if kind == 'attack':
+                self.word(HEAP + 0x1400 + 0x24, self.accessor(6, low, pop=0))
+                self.word(HEAP + 0x1400 + 0x20, self.accessor(7, high, pop=0))
+                self.word(CREATURE + 0xa30, 3)
+                self.word(TARGET + 0xa30, 7)
+                self.word(FIELD + 0x380, RNG)
+                for _ in range(hits):
+                    modified = self.call(0x1ee240, (TARGET, int(modifiers[11]), int(modifiers[12]), int(modifiers[13])), this=CREATURE)
+                    # Same creature/target/RNG state; modifier interception is OFF.
+                    result.append(self.final_call(modified, number, dealt))
+                result.append(self.combat_roll(7 if self.target_is_creature else 0, 3, 0))
+            else:
+                result.append(self.final_call(modifiers[0], number, dealt))
+            return ' '.join(result)
+        finally:
+            self.effect_mode = False
 
     def call(self, rva, args=(), this=HEAP, floating=False, callee_pop=True):
         sp = STACK + 0x8000
@@ -207,6 +283,8 @@ class Original:
             finally:
                 self.dice_mode = False
             return ' '.join(result)
+        if kind in ('ability42', 'attack'):
+            return self.complete(kind, v)
         if kind == 'modify':
             return self.modify(v)
         if kind == 'ratio':
@@ -245,6 +323,7 @@ def corpus():
         yield f'dice {seed} 20 3 7 {number} {low} {high} 3'
 
     yield from modifier_corpus()
+    yield from attack_corpus()
 
 
 def modifier_corpus():
@@ -290,11 +369,37 @@ def modifier_corpus():
                    luck=rng.randrange(3), strength=rng.randrange(4))
 
 
+def attack_corpus():
+    def modifier(ability='66', **changes):
+        f = dict(base=15, offense=11, reduction=1, defense=11, bonus=1, school=5,
+                 abilities=ability, resistances='-', wards=0, giant=0, effect=0,
+                 ranged=0, moved=0, luck=0, strength=3)
+        f.update(changes)
+        return ' '.join(map(str, f.values()))
+    def final(**changes):
+        f = dict(number=10, hp=100000, dealt=0, unit_hp=37, creature=1,
+                 eligible=1, effectiveness=100, power=50, excluded=0, block=0)
+        f.update(changes)
+        return ' '.join(map(str, f.values()))
+    for number, power, effectiveness, unit_hp, block in itertools.product(
+            [0, 1, 4, 5, 9, 10, 11, 49, 50, 499, 500], [1, 50, 100], [0, 50, 99, 100], [1, 37], [0, 1]):
+        yield 'ability42 ' + modifier() + ' ' + final(number=number, power=power, effectiveness=effectiveness, unit_hp=unit_hp, block=block)
+    for ability, creature, eligible, excluded, hp, dealt in itertools.product(
+            ['-', '66'], [0, 1], [0, 1], range(8), [0, 30], [0, 10, 100]):
+        yield 'ability42 ' + modifier(ability) + ' ' + final(creature=creature, eligible=eligible, excluded=excluded, hp=hp, dealt=dealt)
+    for seed, number, ranged, luck, block in itertools.product([1, 32767], [0, 1, 9, 10, 11, 1000], [0, 1], [0, 1, 2], [0, 1]):
+        m = modifier('11,28,20,12,66', offense=5, defense=6, school=3, wards=8,
+                     resistances='21,13', giant=1, effect=1, moved=700, ranged=ranged, luck=luck, strength=1)
+        yield f'attack {seed} 20 1 3 3 ' + m + ' ' + final(number=number, block=block, hp=300, dealt=10)
+    for creature, eligible, excluded, ability in itertools.product([0, 1], [0, 1], [0, 1, 2, 4], ['-', '66']):
+        yield 'attack 7 20 7 19 3 ' + modifier(ability) + ' ' + final(creature=creature, eligible=eligible, excluded=excluded)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--exe', type=Path, required=True)
     parser.add_argument('--report', type=Path, default=ROOT / 'target/testbench-report.json')
-    parser.add_argument('--only', choices=['global', 'combat', 'dice', 'ratio', 'final', 'modify'])
+    parser.add_argument('--only', choices=['global', 'combat', 'dice', 'ratio', 'final', 'modify', 'ability42', 'attack'])
     args = parser.parse_args()
     original = Original(args.exe)
     cases = [case for case in corpus() if args.only is None or case.split()[0] == args.only]
@@ -309,7 +414,7 @@ def main():
         if index % 32 == 0:
             print(f"checking {index + 1}/{len(cases)}", flush=True)
         exe = original.evaluate(case)
-        if case.startswith(('combat ', 'dice ', 'modify ')):
+        if case.startswith(('combat ', 'dice ', 'modify ', 'ability42 ', 'attack ')):
             vectors.append(dict(input=case, exe=exe))
         if exe != rust:
             failures.append(dict(input=case, exe=exe, rust=rust))

@@ -1,3 +1,5 @@
+#[path = "support/attack_case.rs"]
+mod attack_case;
 #[path = "support/modifier_case.rs"]
 mod modifier_case;
 // Line protocol used by tools/testbench/compare.py; no original game data required.
@@ -67,6 +69,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .collect();
                 result.push(rng.roll(target, a.id, 0).to_string());
                 println!("{}", result.join(" "));
+            }
+            [kind @ ("ability42" | "attack"), fields @ ..] => {
+                let values = attack_case::evaluate(kind, fields)?;
+                println!(
+                    "{}",
+                    values
+                        .iter()
+                        .map(i32::to_string)
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                );
             }
             ["modify", fields @ ..] => println!("{}", modifier_case::evaluate(fields)?),
             ["ratio", offense, reduction, defense, bonus] => {

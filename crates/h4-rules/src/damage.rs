@@ -41,6 +41,13 @@ pub mod ability {
     pub const LIFE_PROTECTION: u8 = 0x22;
     /// Doubles damage against "giant" targets in melee. The table says `mechanical`.
     pub const SLAYER_MELEE: u8 = 0x2b;
+    /// Extra HP-based damage after effect 0x98 eligibility/resistance checks.
+    /// The transferred enum name `stealth` does not fit the code; keep the numeric name.
+    pub const ABILITY_42: u8 = 0x42;
+    pub const UNDEAD: u8 = 0x4d;
+    /// Excluded target ability; transferred enum says magic_immunity (not verified).
+    pub const ABILITY_2A: u8 = 0x2a;
+    pub const ELEMENTAL: u8 = 0x11;
     pub const RANGED: u8 = 0x33;
     pub const RANGED_GIANTSLAYER: u8 = 0x35;
     pub const LARGE_AREA_EFFECT: u8 = 0x53;
@@ -133,6 +140,7 @@ pub enum DamageEvent {
     Ward { damage: i32 },
     FireResisted { damage: i32 },
     ColdResisted { damage: i32 },
+    Ability42 { bonus: i32, damage: i32 },
     LimitedByHitPoints { damage: i32 },
     Blocked { damage: i32 },
 }
@@ -288,12 +296,87 @@ fn is_warded(school: School, defender: &Defender) -> bool {
     school != School::Might && (by_spell || by_ability)
 }
 
+/// Inputs resolved by target typing and spell rules for ability 0x42's effect 0x98.
+/// They are explicit because full spell targeting/immunity rules are not implemented.
+#[derive(Debug, Clone, Copy)]
+pub struct Ability42Target {
+    pub is_creature: bool,
+    /// Result of the effect 0x98 target-eligibility check (RVA 1b6140).
+    pub can_affect: bool,
+    /// Resolved effectiveness after resistance (RVA 1f1de0), normally 0..=100.
+    pub effectiveness_percent: i32,
+    /// The target's virtual slot +0x90 via target+0xa4.
+    pub power_percent: i32,
+    /// HP of one target creature, target+0x98 virtual slot +0x30.
+    pub creature_hit_points: i32,
+}
+
+/// Complete finalization: ability 0x42, remaining HP, then block (RVA 1ee540).
+pub fn finalize_attack_damage(
+    damage: i32,
+    attacker: &Attacker,
+    defender: &Defender,
+    already_dealt: i32,
+    effect: Option<&Ability42Target>,
+    log: &mut Vec<DamageEvent>,
+) -> i32 {
+    let mut damage = damage;
+    if attacker.has(ability::ABILITY_42)
+        && ![ability::UNDEAD, ability::ABILITY_2A, ability::ELEMENTAL]
+            .iter().any(|&a| defender.has(a))
+    {
+        if let Some(target) = effect.filter(|t| t.is_creature && t.can_affect) {
+            let power = target.effectiveness_percent.wrapping_mul(target.power_percent) / 100;
+            if power.wrapping_mul(attacker.number) >= 500 {
+                // Preserve x87 operation order: (power * number) * .001 * target HP.
+                let bonus = (((power as f64 * attacker.number as f64) * 0.001)
+                    * target.creature_hit_points as f64) as i32;
+                damage = damage.wrapping_add(bonus);
+                log.push(DamageEvent::Ability42 { bonus, damage });
+            }
+        }
+    }
+    finalize_damage(damage, defender, already_dealt, log)
+}
+
+/// Explicit inputs for one numerical attack, including resolved effect targeting.
+#[derive(Debug, Clone)]
+pub struct HitOptions {
+    pub ranged: bool,
+    pub moved: i32,
+    pub luck: Luck,
+    pub luck_multiplier: f64,
+    pub already_dealt: i32,
+    pub ability_42: Option<Ability42Target>,
+}
+
+impl Default for HitOptions {
+    fn default() -> Self {
+        Self { ranged: false, moved: 0, luck: Luck::Normal, luck_multiplier: 1.0,
+            already_dealt: 0, ability_42: None }
+    }
+}
+
+/// Dice -> complete modifier chain -> finalization, sharing a single battle RNG.
+/// Range/obstacle penalties and the choice of luck outcome belong to the caller.
+pub fn attack_hit(
+    attacker: &Attacker, defender: &Defender, options: &HitOptions,
+    dice: &mut CombatRandom, log: &mut Vec<DamageEvent>,
+) -> i32 {
+    let base = roll_base_damage(attacker, defender.id, dice);
+    log.push(DamageEvent::Rolled { damage: base });
+    let modified = modify_damage(base, attacker, defender, options.ranged, options.moved,
+        options.luck, options.luck_multiplier, log);
+    finalize_attack_damage(modified, attacker, defender, options.already_dealt,
+        options.ability_42.as_ref(), log)
+}
+
 /// The last limits (rva `1ee540`): no more than the target's remaining hit points
 /// (`already_dealt` is damage it has already taken in this attack), then `block` takes 30%
 /// off, rounding to nearest.
 ///
-/// Not done yet: an attacker ability 0x42 adds a bonus based on the target's hit points
-/// when the target is a living creature; the condition isn't understood (see damage.md).
+/// This helper only applies the final limits. Use [`finalize_attack_damage`] for
+/// ability 0x42, with explicitly resolved effect eligibility and resistance.
 pub fn finalize_damage(damage: i32, defender: &Defender, already_dealt: i32, log: &mut Vec<DamageEvent>) -> i32 {
     let mut damage = damage;
     let left = (defender.total_hit_points - already_dealt).max(0);
@@ -308,9 +391,8 @@ pub fn finalize_damage(damage: i32, defender: &Defender, already_dealt: i32, log
     damage
 }
 
-/// A melee hit: dice, modifiers, limits. The order is the one of `get_melee_damage`,
-/// with the dice roll in place of the average (how the real attack chains the three
-/// functions is still to be checked in `attack.cpp`).
+/// Convenience melee hit without resolved spell inputs. Use [`attack_hit`] when
+/// ability 0x42 needs an effect-targeting context.
 pub fn melee_hit(
     attacker: &Attacker,
     defender: &Defender,
@@ -320,10 +402,8 @@ pub fn melee_hit(
     dice: &mut CombatRandom,
     log: &mut Vec<DamageEvent>,
 ) -> i32 {
-    let base = roll_base_damage(attacker, defender.id, dice);
-    log.push(DamageEvent::Rolled { damage: base });
-    let damage = modify_damage(base, attacker, defender, false, moved, luck, luck_multiplier, log);
-    finalize_damage(damage, defender, 0, log)
+    attack_hit(attacker, defender, &HitOptions { moved, luck, luck_multiplier,
+        ..HitOptions::default() }, dice, log)
 }
 
 #[cfg(test)]
@@ -481,6 +561,26 @@ mod tests {
         d.abilities = vec![ability::BLOCK];
         assert_eq!(finalize_damage(15, &d, 0, &mut log), 11); // (15 * 7 + 5) / 10 = 11
         assert_eq!(finalize_damage(50, &d, 30, &mut log), 0); // nothing left to hit
+    }
+
+    #[test]
+    fn ability_42_uses_target_hp_then_limits_and_block() {
+        let mut a = orc();
+        a.abilities.push(ability::ABILITY_42);
+        let mut d = target();
+        d.total_hit_points = 30;
+        d.abilities.push(ability::BLOCK);
+        let effect = Ability42Target { is_creature: true, can_affect: true,
+            effectiveness_percent: 100, power_percent: 50, creature_hit_points: 37 };
+        let mut log = Vec::new();
+        // power * count = 500; bonus = trunc(.5 * 37) = 18.
+        assert_eq!(finalize_attack_damage(20, &a, &d, 5, Some(&effect), &mut log), 18);
+        assert_eq!(log, [DamageEvent::Ability42 { bonus: 18, damage: 38 },
+            DamageEvent::LimitedByHitPoints { damage: 25 }, DamageEvent::Blocked { damage: 18 }]);
+        a.number = 9; // below the original threshold of 500
+        log.clear();
+        assert_eq!(finalize_attack_damage(20, &a, &d, 5, Some(&effect), &mut log), 14);
+        assert_eq!(log, [DamageEvent::Blocked { damage: 14 }]);
     }
 
     #[test]

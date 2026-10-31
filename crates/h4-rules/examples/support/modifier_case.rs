@@ -1,7 +1,9 @@
 //! Shared line-protocol adapter for the exe bench and its golden-vector tests.
 use h4_rules::damage::*;
 
-pub fn evaluate(v: &[&str]) -> Result<i32, Box<dyn std::error::Error>> {
+pub fn parse(
+    v: &[&str],
+) -> Result<(i32, Attacker, Defender, HitOptions), Box<dyn std::error::Error>> {
     let [base, offense, reduction, defense, bonus, school, abilities, resistances, wards, giant, effect, ranged, moved, luck, strength] =
         v
     else {
@@ -58,14 +60,30 @@ pub fn evaluate(v: &[&str]) -> Result<i32, Box<dyn std::error::Error>> {
     let multiplier = *LUCK_MULTIPLIERS
         .get(strength.parse::<usize>()?)
         .ok_or("invalid luck strength")?;
-    Ok(modify_damage(
+    Ok((
         base.parse()?,
+        a,
+        d,
+        HitOptions {
+            ranged: *ranged == "1",
+            moved: moved.parse()?,
+            luck,
+            luck_multiplier: multiplier,
+            ..HitOptions::default()
+        },
+    ))
+}
+
+pub fn evaluate(v: &[&str]) -> Result<i32, Box<dyn std::error::Error>> {
+    let (base, a, d, options) = parse(v)?;
+    Ok(modify_damage(
+        base,
         &a,
         &d,
-        *ranged == "1",
-        moved.parse()?,
-        luck,
-        multiplier,
+        options.ranged,
+        options.moved,
+        options.luck,
+        options.luck_multiplier,
         &mut Vec::new(),
     ))
 }
