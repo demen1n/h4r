@@ -16,7 +16,7 @@ use h4_rules::{damage::*, random::CombatRandom};
 /// `number hp dealt unit-hp creature eligible effectiveness power excluded block` —
 /// attacker stack size, target's remaining HP, damage already dealt, HP of one target
 /// creature, then the [`Ability42Target`] answers (`creature`, `eligible` are 0/1),
-/// `excluded` = bit mask of target immunities (1 undead, 2 ability 0x2a, 4 elemental),
+/// `excluded` = bit mask of target immunities (1 undead, 2 mechanical, 4 elemental),
 /// `block` 0/1.
 pub fn evaluate(kind: &str, mut fields: &[&str]) -> Result<Vec<i32>, Box<dyn std::error::Error>> {
     let prefix: Vec<u32> = if kind == "attack" {
@@ -38,7 +38,7 @@ pub fn evaluate(kind: &str, mut fields: &[&str]) -> Result<Vec<i32>, Box<dyn std
     a.number = number.parse()?;
     d.total_hit_points = hp.parse()?;
     let excluded: u32 = excluded.parse()?;
-    for (i, ability) in [ability::UNDEAD, ability::ABILITY_2A, ability::ELEMENTAL]
+    for (i, ability) in [ability::UNDEAD, ability::MECHANICAL, ability::ELEMENTAL]
         .iter()
         .enumerate()
     {
