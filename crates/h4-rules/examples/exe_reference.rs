@@ -3,7 +3,7 @@
 //! The bench sends one request per line on stdin and reads one answer line per request
 //! from stdout; it asks the original x86 code the same question and compares the two
 //! answers. Requests are space-separated: a kind (`global`, `combat`, `dice`, `ability42`,
-//! `attack`, `modify`, `ratio`, `final`, `effectiveness`, `immunity`) and its numbers.
+//! `attack`, `modify`, `ratio`, `final`, `effectiveness`, `immunity`, `stone_gaze`) and its numbers.
 //! No game data is needed.
 //!
 //! The same parsing helpers (`support/*.rs`) are reused by the golden-vector tests in
@@ -16,6 +16,8 @@ mod effectiveness_case;
 mod immunity_case;
 #[path = "support/modifier_case.rs"]
 mod modifier_case;
+#[path = "support/stone_gaze_case.rs"]
+mod stone_gaze_case;
 use h4_rules::{
     damage::*,
     random::{CombatRandom, GlobalRandom},
@@ -52,6 +54,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             total_hit_points: 1,
         };
         match v.as_slice() {
+            ["stone_gaze", fields @ ..] => println!("{}", stone_gaze_case::evaluate(fields)?),
             ["immunity", fields @ ..] => println!("{}", immunity_case::evaluate(fields)?),
             ["effectiveness", fields @ ..] => println!("{}", effectiveness_case::evaluate(fields)?),
             ["global", seed, count] => {

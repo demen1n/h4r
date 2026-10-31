@@ -1,6 +1,7 @@
 //! Effect immunity/resistance filters and effectiveness from the original exe.
 //! This is a partial eligibility pipeline: effect records, side/refresh/artifact
 //! filters and the target resistance accessor are not yet connected to combat.
+//! [`StoneGazeContext`] assembles damage inputs once the caller resolves those checks.
 
 use crate::damage::ability;
 
@@ -165,5 +166,61 @@ impl ResistanceGate<'_> {
                 && input.caster_abilities.is_some()
                 && !self.same_side);
         !applies || self.resistance < 100
+    }
+}
+
+/// Resolves the spell-rule inputs needed by damage's stone-gaze bonus.
+///
+/// The four implemented filters and effectiveness share one set of abilities, flags
+/// and resistance values, so a caller cannot accidentally resolve them differently.
+/// This is not the full spell system: callers must supply the remaining checks.
+#[derive(Debug, Clone, Copy)]
+pub struct StoneGazeContext<'a> {
+    /// Flags, abilities, active effects, sides and resistance for the stone-gaze record.
+    pub resistance_gate: ResistanceGate<'a>,
+    /// Result of all checks not implemented here (target state, artifacts, side/caster
+    /// restrictions and refresh). None means unknown; never assume these checks pass.
+    pub remaining_eligibility: Option<bool>,
+    /// Target resistance queried with effect id -1, used by ignore_wards.
+    pub generic_resistance: i32,
+    /// Whether the target can be cast to a combat creature (as opposed to a wall).
+    pub is_creature: bool,
+    /// Target's virtual stone-gaze power (+0x90), used by finalization.
+    pub power_percent: i32,
+    /// HP of one target creature, not the remaining HP of its whole stack.
+    pub creature_hit_points: i32,
+}
+
+impl StoneGazeContext<'_> {
+    /// None keeps the damage API's "unknown: no bonus" behavior. An absent caster
+    /// also leaves the result unresolved: stone gaze always needs an attacking stack.
+    pub fn resolve(self) -> Option<crate::damage::Ability42Target> {
+        let remaining_allowed = self.remaining_eligibility?;
+        let input = self.resistance_gate.immunities;
+        let caster = input.caster_abilities?;
+        let can_affect = remaining_allowed
+            && input.allows_general()
+            && input.allows_target_kind()
+            && input.allows_effect_98()
+            && self.resistance_gate.allows();
+        // Eligibility uses effect-specific resistance even with ignore_wards; only
+        // the effectiveness helper switches to generic resistance afterwards.
+        let effectiveness = Effectiveness {
+            eligible: can_affect,
+            resisted: input.flags & flag::RESISTIBLE != 0,
+            resisted_between_sides: input.flags & flag::RESISTIBLE_BETWEEN_SIDES != 0,
+            same_side: self.resistance_gate.same_side,
+            bypass_resistance: caster.contains(&ability::IGNORE_MAGIC_RESISTANCE),
+            generic_resistance_only: caster.contains(&ability::IGNORE_WARDS),
+            effect_resistance: self.resistance_gate.resistance,
+            generic_resistance: self.generic_resistance,
+        };
+        Some(crate::damage::Ability42Target {
+            is_creature: self.is_creature,
+            can_affect,
+            effectiveness_percent: effectiveness.percent(),
+            power_percent: self.power_percent,
+            creature_hit_points: self.creature_hit_points,
+        })
     }
 }

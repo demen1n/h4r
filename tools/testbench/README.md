@@ -21,7 +21,7 @@ calling game functions: x87 uses 53-bit precision, as selected at exe startup
 `0x023f` (53-bit precision, nearest rounding, masked exceptions), which is checked
 and recorded in the report. Skipping this initialization produces misleading differences.
 
-The deterministic corpus has 10,353 requests:
+The deterministic corpus has 11,249 requests:
 
 - 8 seeds × 256 consecutive global RNG outputs (RVA `36a70`), including unsigned
   overflow and the high bit; 2,048 individual numbers.
@@ -57,6 +57,10 @@ The deterministic corpus has 10,353 requests:
   target-kind immunities (`1b3a10`), the effect-0x98 branch of `1b4770`,
   and the full-resistance eligibility gate (`1b5750`). Four outputs per scenario.
 
+- 896 connected stone-gaze scenarios: native eligibility wrapper/pipeline
+  (`1b6140`/`1b30a0`), effectiveness (`1f1de0`) and final damage (`1ee540`).
+  Unported target-state/artifact/side/refresh checks remain fixture boundaries.
+
 Virtual accessors are tiny fixture stubs returning supplied values. The actual
 RNG, arithmetic, branches, limits and rounding execute from the original image.
 Calls have a 30-second execution timeout and a stack-balance check. Modified accessor
@@ -80,7 +84,7 @@ answers. It also stores the original answers for combat/dice/modifier/finalizati
 `vectors`. Differences cause exit status 1; unsupported images or execution errors
 also fail the command. `--report PATH` selects another destination.
 
-Verified on 31 October 2026: 10,353 requests, zero differences. The first run exposed
+Verified on 31 October 2026: 11,249 requests, zero differences. The first run exposed
 two one-ULP differences in the Rust damage coefficient: the original keeps the
 denominator in x87 precision. The fix has a normal Rust regression test.
 
@@ -144,3 +148,14 @@ initialized and diagnostic output is disabled; a minimal SEH chain supports the
 original no-output diagnostic helper. This does not test the full `1b30a0`
 pipeline, artifact/side/refresh filters, record loading or resistance derivation.
 All 7,088 original output rows live in `h4-rules/tests/immunity_vectors.tsv`.
+
+Use `--only stone_gaze` for the `StoneGazeContext` bridge. Unlike the arithmetic
+fixtures, this executes native `1b6140` and `1b30a0` with the four real filters.
+Only unported checks are supplied: initial target state is allowed, artifact
+lookup rejects nothing, refresh is allowed, and the side filter returns the
+explicit remaining-eligibility input. Actual flags/ability/effect/side/resistance
+accessors are still fixture data. The bench compares eligibility, effectiveness
+and finalized damage, without damage dice/modifiers or the full attack command.
+All 896 original answers are in `h4-rules/tests/stone_gaze_vectors.tsv`.
+Unknown remaining eligibility has a separate Rust test and yields `None`, keeping
+the no-bonus behavior of the stand-in battle until spell data is available.

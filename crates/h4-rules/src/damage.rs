@@ -316,9 +316,9 @@ fn is_warded(school: School, defender: &Defender) -> bool {
 /// What ability 0x42 (stone gaze) needs to know about its target that only other game rules can say.
 ///
 /// In the game these come from the type of the target and from the spell rules for effect
-/// 0x98 (who it can touch, how much is resisted). We don't have those rules yet, so instead
-/// of guessing them the caller passes the answers in; the exe comparison bench passes the
-/// same answers to the original code.
+/// 0x98 (who it can touch, how much is resisted). [`crate::effects::StoneGazeContext`]
+/// combines the implemented filters with the caller's remaining eligibility checks.
+/// The caller may also supply resolved answers directly, as in the arithmetic-only bench.
 #[derive(Debug, Clone, Copy)]
 pub struct Ability42Target {
     /// The target is a creature stack (not, say, a wall or a tower). Otherwise no bonus.
