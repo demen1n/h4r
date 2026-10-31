@@ -1,5 +1,10 @@
-# t_creature_ability: value = number in the exe keyword table (rva 0x664314 region) - 1
-# checked against combat damage code: fire_attack/fire_resistance, cold_attack/cold_resistance, ranged, undead, elemental
+# t_creature_ability: value -> keyword, read from the exe table of {i32 value; char* keyword}
+# pairs at VA 0xa64160..0xa64410 (0x56 entries, sorted by keyword; built into a keyword map
+# at VA 0xab0558 by the static initializer at VA 0x63e650). Values are the enum numbers as is.
+# Earlier versions of this file paired each keyword with the next entry's value minus one,
+# which was wrong wherever keyword order and value order differ.
+# checked against combat damage code: fire_attack/fire_resistance, cold_attack/cold_resistance,
+# ranged, undead, elemental, stone_gaze (0x42 with effect 0x98 = spell stone_gaze)
 0x00	3_headed_attack
 0x01	aging
 0x02	area_effect
@@ -14,9 +19,9 @@
 0x0b	charging
 0x0c	cold_attack
 0x0d	cold_resistance
-0x0e	death_protection
-0x0f	curse
-0x10	devouring
+0x0e	curse
+0x0f	devouring
+0x10	death_protection
 0x11	elemental
 0x12	extra_melee_attack
 0x13	extra_ranged_attack
@@ -27,23 +32,23 @@
 0x18	first_strike_immunity
 0x19	flying
 0x1a	fortune
-0x1b	taxpayer
-0x1c	insubstantial
+0x1b	freeze
+0x1c	giantslayer
 0x1d	hydra_strike
-0x1e	ignore_magic_resistance
+0x1e	hypnotize
 0x1f	ignore_wards
 0x20	ignore_zones_of_control
-0x21	melee_giantslayer
+0x21	insubstantial
 0x22	life_protection
 0x23	lightning
 0x24	long_range
-0x25	hypnotize
-0x26	long_weapon
+0x25	long_weapon
+0x26	magic_immunity
 0x27	magic_mirror
 0x28	magic_resistance
 0x29	mana_leech
-0x2a	magic_immunity
-0x2b	mechanical
+0x2a	mechanical
+0x2b	melee_giantslayer
 0x2c	mirth
 0x2d	negate_mind_immunity
 0x2e	no_retaliation
@@ -65,15 +70,15 @@
 0x3e	skeletal
 0x3f	spell_vulnerability
 0x40	spellcaster
-0x41	stone_skin
-0x42	stealth
-0x43	stone_gaze
+0x41	stealth
+0x42	stone_gaze
+0x43	stone_skin
 0x44	strength
 0x45	strike_and_return
 0x46	strikes_twice
 0x47	stunning
-0x48	freeze
-0x49	summons_demons
+0x48	summons_demons
+0x49	taxpayer
 0x4a	teleport
 0x4b	terror
 0x4c	toughness
@@ -81,7 +86,8 @@
 0x4e	unlimited_retaliation
 0x4f	unlimited_shots
 0x50	vampire
-0x51	giantslayer
-0x52	weakness
+0x51	weakness
+0x52	ignore_magic_resistance
 0x53	large_area_effect
 0x54	arc_breath_attack
+0x55	no_ranged_penalties
