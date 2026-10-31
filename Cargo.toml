@@ -4,7 +4,7 @@ members = ["crates/h4-formats", "crates/h4-state", "crates/h4-rules", "crates/h4
 
 [workspace.package]
 edition = "2021"
-license = "GPL-3.0-only"
+license = "GPL-3.0-or-later"
 
 [profile.dev.package."*"]
 # decoding sprites is slow in debug builds otherwise

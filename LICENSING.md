@@ -4,7 +4,8 @@ Copyright (C) 2026 h4r contributors.
 
 h4r's original source code and original documentation are licensed under the
 GNU General Public License as published by the Free Software Foundation,
-version 3 only. The SPDX identifier is `GPL-3.0-only`.
+either version 3 of the License, or (at your option) any later version.
+The SPDX identifier is `GPL-3.0-or-later`.
 
 h4r is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
 without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR

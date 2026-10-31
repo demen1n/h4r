@@ -201,6 +201,6 @@ Do not submit original game assets, executables, or decompiler output. Tests sho
 
 ## License
 
-h4r's original source code and documentation are licensed under the **GNU General Public License, version 3 only** (`GPL-3.0-only`). See [LICENSE](LICENSE) for the full text and [LICENSING.md](LICENSING.md) for scope and provenance notes.
+h4r's original source code and documentation are licensed under the **GNU General Public License, version 3 or (at your option) any later version** (`GPL-3.0-or-later`). See [LICENSE](LICENSE) for the full text and [LICENSING.md](LICENSING.md) for scope and provenance notes.
 
 Dependencies retain their own licenses; see the [dependency inventory](THIRD_PARTY.md). The original game's code, assets, and trademarks are not licensed by this project.
