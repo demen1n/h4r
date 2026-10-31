@@ -124,3 +124,8 @@ Scope still to add: spell-targeting/immunity rules, real creature/battlefield
 objects, ranged penalties, luck selection, and full attack side effects.
 This is a function-level bench, not a replay or proof that full battles match.
 The ordinary cross-platform CI does not require Unicorn or an original exe.
+
+Effectiveness helper: `--only effectiveness` compares 320 cases of RVA `1f1de0`
+(flags, sides, abilities 0x52/0x1f, specific versus generic resistance, i32 edges).
+Eligibility and resistance accessors remain explicit fixture inputs. Expected
+answers are retained in `h4-rules/tests/effectiveness_vectors.tsv` for CI.

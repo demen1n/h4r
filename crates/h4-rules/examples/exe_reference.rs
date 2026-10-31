@@ -47,6 +47,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             total_hit_points: 1,
         };
         match v.as_slice() {
+            ["effectiveness", eligible, resisted, between, same, bypass, generic, specific_r, generic_r] =>
+            {
+                let inputs = h4_rules::effects::Effectiveness {
+                    eligible: eligible.parse::<u8>()? != 0,
+                    resisted: resisted.parse::<u8>()? != 0,
+                    resisted_between_sides: between.parse::<u8>()? != 0,
+                    same_side: same.parse::<u8>()? != 0,
+                    bypass_resistance: bypass.parse::<u8>()? != 0,
+                    generic_resistance_only: generic.parse::<u8>()? != 0,
+                    effect_resistance: specific_r.parse()?,
+                    generic_resistance: generic_r.parse()?,
+                };
+                println!("{}", inputs.percent());
+            }
             ["global", seed, count] => {
                 let mut rng = GlobalRandom::new(seed.parse()?);
                 let values: Vec<String> = (0..count.parse::<usize>()?)
