@@ -16,7 +16,7 @@ fn main() {
     let seed = args.next().map_or(1, |s| s.parse().expect("seed"));
     let difficulty = args.next().map_or(1, |s| s.parse().expect("difficulty"));
 
-    let res = Resources::open(&data_dir(None)).expect("game data");
+    let res = Resources::open(data_dir(None)).expect("game data");
     let table = Table::read(&res.read("table.creatures.h4d").expect("read"), "table.creatures").expect("parse");
     let by_id = creatures::in_enum_order(&creatures::from_table(&table).expect("stats")).expect("order");
     let map = MapFile::read(&std::fs::read(&path).expect("read map"), &path).expect("map");

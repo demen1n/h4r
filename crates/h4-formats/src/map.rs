@@ -391,6 +391,9 @@ pub fn row_ranges(size: usize) -> Vec<(usize, usize)> {
     let first_start = (a * 2) / h - 1 - down;
     let second_start = (b * 2 - h2 + 1) / h2 - up;
     let mut rows = Vec::with_capacity(size);
+    // `up` and `down` change together on every row, as in the exe's loop; keeping both as
+    // plain counters reads closer to the original than folding `up` into the `for`.
+    #[allow(clippy::explicit_counter_loop)]
     for _ in 0..size {
         let mut start = first_start + down;
         if start < 0 {
@@ -511,7 +514,7 @@ fn read_tiles_at(data: &[u8], header: &MapHeader, start: usize) -> Result<(usize
 /// Tiles and vertices of all levels.
 fn tile_and_vertex_counts(header: &MapHeader) -> Result<(usize, usize)> {
     let size = header.size as usize;
-    if size < 2 || size > 1024 || !(1..=2).contains(&header.levels) {
+    if !(2..=1024).contains(&size) || !(1..=2).contains(&header.levels) {
         return bad(format!("implausible map size {size} x {} levels", header.levels));
     }
     let levels = header.levels as usize;
@@ -529,7 +532,7 @@ pub fn search_tiles_start(map: &MapFile) -> Result<usize> {
 /// Find the tile array by its end (see the module docs) and read tiles and heights.
 fn find_tiles(data: &[u8], header: &MapHeader, header_end: usize) -> Result<(usize, Vec<Tile>, Vec<u8>)> {
     let size = header.size as usize;
-    if size < 2 || size > 1024 || !(1..=2).contains(&header.levels) {
+    if !(2..=1024).contains(&size) || !(1..=2).contains(&header.levels) {
         return bad(format!("implausible map size {size} x {} levels", header.levels));
     }
     let levels = header.levels as usize;

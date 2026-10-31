@@ -41,6 +41,10 @@ impl GlobalRandom {
     }
 
     /// The next number, 0..=32767 (the game's `operator()()`).
+    ///
+    /// Clippy suggests implementing `Iterator` instead, but then every call would return
+    /// `Option<u32>` for a sequence that never ends; a plain method is simpler.
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> u32 {
         self.state = step(self.state);
         output(self.state)

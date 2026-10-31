@@ -260,7 +260,7 @@ fn valid_metatile_decodes() {
     // column 32 is 31 tall and starts at y = 0 of the 32-pixel box
     let o = 4 * 32;
     assert_eq!(&canvas[o..o + 4], &[255, 0, 0, 255]);
-    let drawn = canvas.chunks_exact(4).filter(|p| p[3] != 0).count();
+    let drawn = canvas.as_chunks::<4>().0.iter().filter(|p| p[3] != 0).count();
     assert_eq!(drawn, 1);
 }
 

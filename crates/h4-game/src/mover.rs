@@ -219,7 +219,7 @@ impl Mover {
     }
 
     fn update_standing(&mut self, res: &Resources, dt: f32) {
-        let played_once = self.animation(res, self.phase).map_or(true, |a| self.clock >= a.duration());
+        let played_once = self.animation(res, self.phase).is_none_or(|a| self.clock >= a.duration());
         match self.phase {
             Phase::Wait => {
                 self.fidget_in -= dt;

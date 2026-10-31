@@ -49,6 +49,10 @@ pub struct MapObject {
     pub kind: ObjectKind,
 }
 
+// Clippy warns that `Army` is much bigger than `Placed`, so every value takes the size of
+// the big one. Objects are read once per map and there are only a few thousand of them, so
+// the wasted memory doesn't matter, and without a `Box` the variants are simpler to match.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum ObjectKind {
     /// A creature army or hero walking on the map (`t_army`).

@@ -100,8 +100,9 @@ impl Mosaic {
         for &rank in &ranks {
             let mut terrain = [[0u8; 2]; TERRAINS];
             for t in 0..TERRAINS {
-                for s in 0..SUBTYPES[t] {
-                    terrain[t][s] = (roll(&mut state) % PICTURES[t]) as u8;
+                // One roll per subtype the terrain has (the rest of the pair stays 0).
+                for picture in &mut terrain[t][..SUBTYPES[t]] {
+                    *picture = (roll(&mut state) % PICTURES[t]) as u8;
                 }
             }
             let mut road = [0u8; 3];
@@ -159,7 +160,9 @@ impl Mosaic {
                 }
             }
         }
-        candidates.sort_by(|a, b| b.2.rank.cmp(&a.2.rank));
+        // Highest rank first (`Reverse` flips the order). The sort is stable, so blocks of
+        // equal rank keep the order they were found in.
+        candidates.sort_by_key(|c| std::cmp::Reverse(c.2.rank));
         // the highest block with a full window hides everything below it
         let top = candidates.iter().position(|c| c.3).unwrap_or(candidates.len() - 1);
         candidates[..=top]
