@@ -255,7 +255,8 @@ pub fn damage_modifier(attacker: &Attacker, defender: &Defender) -> f32 {
     } else if bonus > 1.0 {
         bonus = 1.0;
     }
-    let ratio = offense / (defender.defense_basic * bonus);
+    // x87 keeps the denominator and division extended until returning f32.
+    let ratio = (offense as f64 / (defender.defense_basic as f64 * bonus as f64)) as f32;
     // Not `f32::clamp`: like the game, check the lower bound first and treat "not a number"
     // (0 / 0) as below it, so the result is always a usable number.
     if !(ratio >= 0.05) {
@@ -370,6 +371,19 @@ mod tests {
         assert_eq!(modify(100, &orc(), &d), 2000);
         d.defense_basic = 0.0; // division by zero gives infinity, still 20
         assert_eq!(damage_modifier(&orc(), &d), 20.0);
+    }
+
+    #[test]
+    fn ratio_keeps_x87_intermediate_precision() {
+        // Original exe, RVA 250a60: rounding the denominator to f32 loses one ULP.
+        let mut a = orc();
+        let mut d = target();
+        a.offense = 0.1;
+        d.defense_basic = 0.1;
+        d.defense_bonus = 1.5;
+        assert_eq!(damage_modifier(&a, &d).to_bits(), 0x3f2aaaab);
+        a.defense_reduction = 0.5;
+        assert_eq!(damage_modifier(&a, &d).to_bits(), 0x3eaaaaab);
     }
 
     #[test]
