@@ -100,6 +100,9 @@ async fn main() {
     let mut background = backdrop(&res, &fields[field]);
     let mut item = scenery(&res, &objects[object], shadow);
     let mut anchor = vec2(590., 512.);
+    let mut grid = std::env::var_os("H4_GRID").is_some();
+    let mut selected = None;
+    let mut map = res.read(&fields[field]).and_then(|b| BattlefieldPreset::read(&b)).ok();
     let mut paused = false;
     let mut elapsed = 0.;
     let mut ticks = 0;
@@ -128,7 +131,12 @@ async fn main() {
         if is_key_pressed(KeyCode::Space) {
             paused = !paused;
         }
+        if is_key_pressed(KeyCode::G) {
+            grid = !grid;
+        }
         if reload_field {
+            map = res.read(&fields[field]).and_then(|b| BattlefieldPreset::read(&b)).ok();
+            selected = None;
             background = backdrop(&res, &fields[field]);
         }
         if reload_item {
@@ -138,11 +146,35 @@ async fn main() {
         if !paused {
             elapsed += get_frame_time();
         }
-        let scale = (screen_width() / 1180.).min((screen_height() - 110.) / 1024.);
-        let origin = vec2((screen_width() - 1180. * scale) / 2., 110.);
+        let scale = (screen_width() / 1180.).min((screen_height() - 135.) / 1024.).max(0.01);
+        let origin = vec2((screen_width() - 1180. * scale) / 2., 135.);
         if is_mouse_button_pressed(MouseButton::Left) {
             let mouse = mouse_position();
-            anchor = (vec2(mouse.0, mouse.1) - origin) / scale;
+            let clicked = (vec2(mouse.0, mouse.1) - origin) / scale;
+            if mouse.1 >= origin.y {
+                let nearest = map.as_ref().and_then(|map| {
+                    map.rows
+                        .iter()
+                        .enumerate()
+                        .flat_map(|(x, row)| (row.start..row.start + row.cells.len()).map(move |y| (x, y)))
+                        .min_by(|&(ax, ay), &(bx, by)| {
+                            let a = BattlefieldPreset::cell_center(ax, ay).unwrap();
+                            let b = BattlefieldPreset::cell_center(bx, by).unwrap();
+                            vec2(a.0 as f32, a.1 as f32)
+                                .distance_squared(clicked)
+                                .total_cmp(&vec2(b.0 as f32, b.1 as f32).distance_squared(clicked))
+                        })
+                });
+                selected = nearest;
+                anchor = if grid {
+                    nearest
+                        .and_then(|(x, y)| BattlefieldPreset::cell_center(x, y))
+                        .map(|(x, y)| vec2(x as f32, y as f32))
+                        .unwrap_or(clicked)
+                } else {
+                    clicked
+                };
+            }
         }
         clear_background(Color::from_rgba(36, 39, 43, 255));
         if let Ok(layers) = &background {
@@ -157,6 +189,22 @@ async fn main() {
                         ..Default::default()
                     },
                 );
+            }
+        }
+        if grid {
+            if let Some(map) = &map {
+                for (x, row) in map.rows.iter().enumerate() {
+                    for y in row.start..row.start + row.cells.len() {
+                        let (cx, cy) = BattlefieldPreset::cell_center(x, y).unwrap();
+                        let center = origin + vec2(cx as f32, cy as f32) * scale;
+                        let corners = [vec2(-16., 0.), vec2(0., -8.), vec2(16., 0.), vec2(0., 8.)];
+                        for i in 0..4 {
+                            let a = center + corners[i] * scale;
+                            let b = center + corners[(i + 1) % 4] * scale;
+                            draw_line(a.x, a.y, b.x, b.y, 1., Color::new(1., 1., 1., 0.16));
+                        }
+                    }
+                }
             }
         }
         if let Ok(item) = &item {
@@ -180,12 +228,20 @@ async fn main() {
             fields[field].clone(),
             objects[object].clone(),
             item.as_ref().map(|s| s.details.clone()).unwrap_or_else(|e| e.clone()),
-            "Left/Right field | Up/Down object | click place | Space pause | S shadow | Esc exit".into(),
+            "Left/Right field | Up/Down object | click place | G grid/snap | Space pause | S shadow | Esc exit".into(),
         ]
         .iter()
         .enumerate()
         {
             draw_text(text, 10., 22. + i as f32 * 24., 19., WHITE);
+        }
+        let status = selected.and_then(|(x, y)| {
+            map.as_ref()
+                .and_then(|m| m.cell(x, y))
+                .map(|v| format!("Cell ({x}, {y}): raw value {v}; blocking rules are not connected"))
+        });
+        if let Some(status) = status {
+            draw_text(&status, 10., 118., 18., YELLOW);
         }
         if let Err(e) = &background {
             draw_text(e, 10., 135., 20., RED);
