@@ -6,6 +6,7 @@
 
 use h4_formats::battlefield::BattlefieldPreset;
 use h4_formats::combat_object::{CombatObject, CombatObjectSegment};
+use serde::{Deserialize, Serialize};
 
 // Bits of the live cell's flag byte (+1). 0x08 is still unexplained; 0x10 is
 // named by value because only one of its readers (the obstacle placer) is known.
@@ -22,7 +23,7 @@ const PRESET_BITS: u8 = FLAG_BLOCKED | FLAG_08 | FLAG_10;
 /// Answers to the two virtual queries RVA 183a10 asks of each object in a cell.
 /// Static scenery fills them from its resource (`PlacedObstacle`); other
 /// object kinds and dynamic compound state still supply them explicitly.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CellOccupant {
     /// Identity of one native object or segment, used to exclude "myself".
     pub id: u32,
@@ -34,7 +35,7 @@ pub struct CellOccupant {
 
 /// The two bytes changed by preset application (RVA 162aa0).
 /// Occupants and the rest of the live cell are unaffected.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct CellSurface {
     pub terrain: u8,
     pub flags: u8,
@@ -85,7 +86,7 @@ pub fn cell_is_blocked(
 
 /// Rounded square footprint of one stationary-object segment (RVA 1fc340).
 /// Coordinates are offsets from the segment's top-left map cell.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CombatFootprint {
     pub size: u8,
 }
@@ -114,7 +115,7 @@ impl CombatFootprint {
 
 /// One resolved segment. Compound scenery can supply several of these.
 /// Dynamic changes (e.g. a destroyed gate) must update the occupant inputs.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlacedObstacle {
     pub at: (i32, i32),
     pub footprint: CombatFootprint,
@@ -170,7 +171,7 @@ impl PlacedObstacle {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BattlefieldCell {
     pub surface: CellSurface,
     pub occupants: Vec<CellOccupant>,
@@ -178,7 +179,7 @@ pub struct BattlefieldCell {
 
 /// One stored row: cells `start..start + cells.len()` (the field is a
 /// diamond inside a square, so rows have different bounds).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct GridRow {
     start: usize,
     cells: Vec<BattlefieldCell>,
@@ -186,7 +187,7 @@ struct GridRow {
 
 /// Sparse field geometry, preset overlays and resolved occupants, without graphics.
 /// The underlying surface is explicit: preset zero may inherit earlier state.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BattlefieldGrid {
     rows: Vec<GridRow>,
 }
@@ -219,7 +220,8 @@ impl BattlefieldGrid {
     /// Half-open range of valid `y` in row `x`.
     pub fn row_bounds(&self, x: i32) -> Option<(i32, i32)> {
         let row = self.rows.get(usize::try_from(x).ok()?)?;
-        Some((row.start as i32, (row.start + row.cells.len()) as i32))
+        let end = row.start.checked_add(row.cells.len())?;
+        Some((i32::try_from(row.start).ok()?, i32::try_from(end).ok()?))
     }
 
     /// Port of RVA 162cb0, run after the presets and before obstacles: block

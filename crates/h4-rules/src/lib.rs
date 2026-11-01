@@ -6,7 +6,8 @@
 //!
 //! - [`random`]: the game's two random number generators, bit-exact.
 //! - [`damage`]: damage of one stack hitting another.
-//! - [`battle`]: a stand-in battle without a battlefield, and writing its result back.
+//! - [`battle`]: the map's stand-in fight; [`battle::state`] is the owned battle model
+//!   with field occupancy, explicit deployment/turn order, JSON snapshots and an event log.
 //! - [`artifacts`]: artifact numbering, models and random picks.
 //! - [`creatures`]: creature statistics from `table.creatures`.
 //! - [`heroes`]: hero classes and hero models on the map.

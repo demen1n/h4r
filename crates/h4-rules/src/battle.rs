@@ -17,6 +17,10 @@
 //!   the target needs spell rules we don't have yet, so `HitOptions::ability_42` stays `None`;
 //! - the winner's heroes each get the experience of every enemy creature killed.
 
+pub mod state;
+pub use state::BattleState;
+
+use serde::{Deserialize, Serialize};
 use h4_state::army::{Army, ArmyId, Slot, SLOTS};
 use h4_state::GameState;
 
@@ -25,7 +29,7 @@ use crate::damage::{self, Attacker, DamageEvent, Defender, HitOptions, School};
 use crate::random::{CombatRandom, GlobalRandom};
 
 /// The two sides. The attacker is the army that stepped onto the other.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Side {
     Attacker,
     Defender,

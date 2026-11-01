@@ -5,12 +5,13 @@
 //! too (wandering monsters, or troops sent off on their own).
 
 use crate::{Color, Pos};
+use serde::{Deserialize, Serialize};
 
 /// How many members an army has room for.
 pub const SLOTS: usize = 7;
 
 /// Identifies an army on the map for the whole game (see `GameState::next_army_id`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ArmyId(pub u32);
 
 /// A number of creatures of one kind.
@@ -21,7 +22,7 @@ pub struct Stack {
     pub count: i32,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Hero {
     /// Portrait id, which also gives the default name and biography; -1 if none was set.
     pub portrait: i16,
