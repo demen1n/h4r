@@ -6,12 +6,14 @@ use crate::Result;
 #[derive(Debug, Clone)]
 pub struct CombatObject {
     pub version: u16,
-    /// Two dimensions/properties; units have not been confirmed.
+    /// Overall dimensions in battlefield cells, before image-dependent segmentation.
     pub properties: [u8; 2],
     pub parameter: u8,
     pub frames_per_second: u8,
+    /// Nonzero segments are skipped by the static cell-blocking query.
     pub flag: u8,
-    /// Five bytes introduced in version 1; meanings still unverified.
+    /// Five bytes introduced in version 1. The first is the static blocking
+    /// predicate; meanings of the remaining four are still unverified.
     pub attributes: [u8; 5],
     /// Original numeric type and name, before the engine resolves their enum.
     pub type_id: u16,

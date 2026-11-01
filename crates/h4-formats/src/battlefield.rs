@@ -18,13 +18,14 @@ pub struct BattlefieldPreset {
 }
 
 impl BattlefieldPreset {
-    /// Cell center in the preset's 1180x1024 coordinate system (RVA 34db00).
+    /// Cell center in the preset's 1180x1024 coordinate system.
+    /// Native footprint center (f100) followed by projection (164b40).
     pub fn cell_center(x: usize, y: usize) -> Option<(i32, i32)> {
         if x >= 102 || y >= 102 {
             return None;
         }
         let (x, y) = (x as i32, y as i32);
-        Some((590 + (y - x) * 16, 512 + (x + y - 102) * 8))
+        Some((590 + (y - x) * 16, 520 + (x + y - 102) * 8))
     }
 
     /// Raw value at a packed map coordinate; absent outside stored row bounds.
@@ -89,9 +90,9 @@ mod tests {
 
     #[test]
     fn map_coordinates_match_the_centered_isometric_rectangle() {
-        assert_eq!(BattlefieldPreset::cell_center(51, 51), Some((590, 512)));
-        assert_eq!(BattlefieldPreset::cell_center(50, 51), Some((606, 504)));
-        assert_eq!(BattlefieldPreset::cell_center(51, 50), Some((574, 504)));
+        assert_eq!(BattlefieldPreset::cell_center(51, 51), Some((590, 520)));
+        assert_eq!(BattlefieldPreset::cell_center(50, 51), Some((606, 512)));
+        assert_eq!(BattlefieldPreset::cell_center(51, 50), Some((574, 512)));
         assert_eq!(BattlefieldPreset::cell_center(102, 0), None);
         let field = BattlefieldPreset::read(&fixture()).unwrap();
         assert_eq!(field.cell(0, 36), None);

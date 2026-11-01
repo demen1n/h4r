@@ -3,7 +3,9 @@ use h4_formats::archive::{data_dir, Resources};
 use h4_formats::battlefield::BattlefieldPreset;
 use h4_formats::combat_object::CombatObject;
 use h4_formats::sprite::Rect;
-use h4_rules::battlefield::{apply_preset_cell, cell_is_blocked, CellSurface};
+use h4_rules::battlefield::{
+    apply_preset_cell, cell_is_blocked, BattlefieldGrid, CellSurface, PlacedObstacle,
+};
 use macroquad::prelude::*;
 
 // Zero inherits earlier overlays on land, but blocks outside the bridge deck.
@@ -34,6 +36,7 @@ struct Scenery {
     offset: Vec2,
     fps: f32,
     details: String,
+    collision: Result<Option<PlacedObstacle>, &'static str>,
 }
 fn texture(width: i32, height: i32, rgba: &[u8]) -> Result<Texture2D, String> {
     let w = u16::try_from(width).map_err(|_| "invalid image width")?;
@@ -77,9 +80,15 @@ fn scenery(res: &Resources, name: &str, shadow: bool) -> Result<Scenery, String>
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
+    let collision = if model.attributes[0] == 0 || model.flag != 0 {
+        Ok(None)
+    } else {
+        PlacedObstacle::from_square_model(&model, (0, 0), 1).map(Some)
+    };
     Ok(Scenery {
         frames,
         area,
+        collision,
         offset: vec2(model.image.offset.0 as f32, model.image.offset.1 as f32),
         fps: f32::from(model.frames_per_second.max(1)),
         details: format!(
@@ -120,19 +129,34 @@ async fn main() {
         eprintln!("no battlefield or scenery resources");
         return;
     }
-    let (mut field, mut object) = (0, 0);
+    let mut field = 0;
+    let mut object = match std::env::var("H4_SCENERY") {
+        Ok(name) => match objects
+            .iter()
+            .position(|item| item.eq_ignore_ascii_case(&name))
+        {
+            Some(index) => index,
+            None => {
+                eprintln!("unknown scenery resource: {name}");
+                return;
+            }
+        },
+        Err(_) => 0,
+    };
     let mut shadow = true;
     let mut background = backdrop(&res, &fields[field]);
     let mut item = scenery(&res, &objects[object], shadow);
-    let mut anchor = vec2(590., 512.);
+    let mut anchor = vec2(590., 520.);
     let mut grid = std::env::var_os("H4_GRID").is_some();
     // This is a user-selected battle context, independent of resource names.
     let mut on_bridge = std::env::var("H4_BRIDGE").is_ok_and(|v| v == "1");
-    let mut selected = None;
+    let mut selected = Some((51, 51));
     let mut map = res
         .read(&fields[field])
         .and_then(|b| BattlefieldPreset::read(&b))
         .ok();
+    let mut collision = None;
+    let mut collision_dirty = true;
     let mut paused = false;
     let mut elapsed = 0.;
     let mut ticks = 0;
@@ -163,6 +187,7 @@ async fn main() {
         }
         if is_key_pressed(KeyCode::B) {
             on_bridge = !on_bridge;
+            collision_dirty = true;
         }
         if is_key_pressed(KeyCode::G) {
             grid = !grid;
@@ -172,10 +197,13 @@ async fn main() {
                 .read(&fields[field])
                 .and_then(|b| BattlefieldPreset::read(&b))
                 .ok();
-            selected = None;
+            selected = Some((51, 51));
+            anchor = vec2(590., 520.);
+            collision_dirty = true;
             background = backdrop(&res, &fields[field]);
         }
         if reload_item {
+            collision_dirty = true;
             item = scenery(&res, &objects[object], shadow);
             elapsed = 0.;
         }
@@ -206,6 +234,7 @@ async fn main() {
                         })
                 });
                 selected = nearest;
+                collision_dirty = true;
                 anchor = if grid {
                     nearest
                         .and_then(|(x, y)| BattlefieldPreset::cell_center(x, y))
@@ -215,6 +244,27 @@ async fn main() {
                     clicked
                 };
             }
+        }
+        // A blank underlying field is explicit; terrain generation is separate.
+        if collision_dirty {
+            collision = map.as_ref().map(|map| {
+                let mut grid = BattlefieldGrid::from_preset(
+                    map,
+                    CellSurface {
+                        terrain: 1,
+                        flags: 0x10,
+                    },
+                    on_bridge,
+                );
+                if let (Some(at), Ok(item)) = (selected, &item) {
+                    if let Some(mut obstacle) = item.collision? {
+                        obstacle.at = (at.0 as i32, at.1 as i32);
+                        grid.add_obstacle(obstacle)?;
+                    }
+                }
+                Ok::<_, &'static str>(grid)
+            });
+            collision_dirty = false;
         }
         clear_background(Color::from_rgba(36, 39, 43, 255));
         if let Ok(layers) = &background {
@@ -240,7 +290,22 @@ async fn main() {
                         let (cx, cy) = BattlefieldPreset::cell_center(x, y).unwrap();
                         let center = origin + vec2(cx as f32, cy as f32) * scale;
                         let corners = [vec2(-16., 0.), vec2(0., -8.), vec2(16., 0.), vec2(0., 8.)];
-                        let (_, color) = preset_status(map.cell(x, y).unwrap(), on_bridge);
+                        let (_, base_color) = preset_status(map.cell(x, y).unwrap(), on_bridge);
+                        let color = match &collision {
+                            Some(Ok(grid))
+                                if grid
+                                    .cell(x as i32, y as i32)
+                                    .is_some_and(|c| !c.occupants.is_empty()) =>
+                            {
+                                if grid.is_blocked(x as i32, y as i32, None) {
+                                    PINK
+                                } else {
+                                    base_color
+                                }
+                            }
+                            Some(Err(_)) => GRAY,
+                            _ => base_color,
+                        };
                         for i in 0..4 {
                             let a = center + corners[i] * scale;
                             let b = center + corners[(i + 1) % 4] * scale;
@@ -275,6 +340,29 @@ async fn main() {
                 },
             );
         }
+        // Keep the collision footprint visible even beneath an opaque sprite.
+        if grid {
+            if let (Some(Ok(collision)), Some(map)) = (&collision, &map) {
+                for (x, row) in map.rows.iter().enumerate() {
+                    for y in row.start..row.start + row.cells.len() {
+                        if !collision
+                            .cell(x as i32, y as i32)
+                            .is_some_and(|cell| !cell.occupants.is_empty())
+                        {
+                            continue;
+                        }
+                        let (cx, cy) = BattlefieldPreset::cell_center(x, y).unwrap();
+                        let center = origin + vec2(cx as f32, cy as f32) * scale;
+                        let corners = [vec2(-16., 0.), vec2(0., -8.), vec2(16., 0.), vec2(0., 8.)];
+                        for i in 0..4 {
+                            let a = center + corners[i] * scale;
+                            let b = center + corners[(i + 1) % 4] * scale;
+                            draw_line(a.x, a.y, b.x, b.y, 1.5, PINK);
+                        }
+                    }
+                }
+            }
+        }
         let point = origin + anchor * scale;
         draw_line(point.x - 5., point.y, point.x + 5., point.y, 1., YELLOW);
         draw_line(point.x, point.y - 5., point.x, point.y + 5., 1., YELLOW);
@@ -283,7 +371,7 @@ async fn main() {
             objects[object].clone(),
             item.as_ref().map(|s| s.details.clone()).unwrap_or_else(|e| e.clone()),
             "Left/Right field | Up/Down object | G grid | B bridge mode | Space pause | S shadow | Esc exit".into(),
-            format!("Battle on bridge: {} | red blocked, green clear, orange inherited | scenery blocking excluded", if on_bridge { "yes" } else { "no" }),
+            format!("Battle on bridge: {} | red preset, pink scenery, green clear, orange inherited", if on_bridge { "yes" } else { "no" }),
         ]
         .iter()
         .enumerate()
@@ -294,7 +382,15 @@ async fn main() {
             map.as_ref().and_then(|m| m.cell(x, y)).map(|v| {
                 format!(
                     "Cell ({x}, {y}): code {v}; {}",
-                    preset_status(v, on_bridge).0
+                    match &collision {
+                        Some(Ok(grid))
+                            if grid
+                                .cell(x as i32, y as i32)
+                                .is_some_and(|c| !c.occupants.is_empty()) =>
+                            "occupied by scenery",
+                        Some(Err(error)) => error,
+                        _ => preset_status(v, on_bridge).0,
+                    }
                 )
             })
         });
