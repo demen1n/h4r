@@ -4,7 +4,7 @@ use h4_formats::battlefield::{BattlefieldPreset, BattlefieldRow};
 use std::collections::HashMap;
 
 use h4_formats::combat_object::{CombatHeaderEntry, CombatHeaderTable, CombatObject};
-use h4_formats::sprite::Rect;
+use h4_formats::sprite::{ActorSequence, Rect};
 use h4_formats::table::Table;
 use h4_rules::battlefield::{
     apply_preset_cell, cell_is_blocked, BattlefieldGrid, CellSurface, PlacedObstacle, FLAG_10,
@@ -44,7 +44,7 @@ fn placer_inputs(res: &Resources) -> Result<(Vec<CombatHeaderEntry>, ObstacleWei
 
 /// Draw one frame of a scenery model with its image anchored at `anchor`
 /// (battlefield pixels).
-fn draw_scenery(item: &Scenery, anchor: Vec2, origin: Vec2, scale: f32, elapsed: f32) {
+fn draw_scenery(item: &SceneryPart, anchor: Vec2, origin: Vec2, scale: f32, elapsed: f32) {
     let index = (elapsed * item.fps) as usize % item.frames.len();
     let pos =
         origin + (anchor + item.offset + vec2(item.area.left as f32, item.area.top as f32)) * scale;
@@ -86,11 +86,18 @@ struct Backdrop {
     texture: Texture2D,
     area: Rect,
 }
-struct Scenery {
+struct SceneryPart {
+    /// Position relative to the model origin, in battlefield pixels.
+    anchor: Vec2,
+    /// Near corner of this square segment, relative to the model origin.
+    depth: f32,
     frames: Vec<Texture2D>,
     area: Rect,
     offset: Vec2,
     fps: f32,
+}
+struct Scenery {
+    parts: Vec<SceneryPart>,
     details: String,
     collision: Vec<PlacedObstacle>,
 }
@@ -152,22 +159,32 @@ fn scenery(res: &Resources, name: &str, shadow: bool) -> Result<Scenery, String>
         .read(name)
         .and_then(|b| CombatObject::read(&b))
         .map_err(|e| e.to_string())?;
-    let area = model.image.bounds().ok_or("empty object image")?;
-    let frames = (0..model.image.frames.len().max(1))
-        .map(|i| {
-            texture(
-                area.width(),
-                area.height(),
-                &model.image.compose(i, area, shadow),
-            )
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let segments = model.segments().map_err(|e| e.to_string())?;
+    let mut parts = Vec::new();
+    for segment in &segments {
+        // The native crop can retain empty segments. They still take part in
+        // collision, but have no pixels to upload.
+        let Some(area) = segment.image.bounds() else {
+            continue;
+        };
+        let image: &ActorSequence = &segment.image;
+        let frames = (0..image.frames.len().max(1))
+            .map(|i| texture(area.width(), area.height(), &image.compose(i, area, shadow)))
+            .collect::<Result<Vec<_>, _>>()?;
+        let (x, y) = segment.at;
+        parts.push(SceneryPart {
+            anchor: vec2(16. * (y - x) as f32, 8. * (x + y) as f32),
+            depth: 8. * (x + y + 2 * i32::from(segment.size)) as f32,
+            frames,
+            area,
+            offset: vec2(image.offset.0 as f32, image.offset.1 as f32),
+            fps: f32::from(model.header.frames_per_second.max(1)),
+        });
+    }
     let collision = if !model.blocks() || model.skips_blocking() {
         Vec::new()
     } else {
-        model
-            .segments()
-            .map_err(|e| e.to_string())?
+        segments
             .iter()
             .enumerate()
             .map(|(i, segment)| {
@@ -177,11 +194,8 @@ fn scenery(res: &Resources, name: &str, shadow: bool) -> Result<Scenery, String>
             .collect()
     };
     Ok(Scenery {
-        frames,
-        area,
+        parts,
         collision,
-        offset: vec2(model.image.offset.0 as f32, model.image.offset.1 as f32),
-        fps: f32::from(model.header.frames_per_second.max(1)),
         details: format!(
             "type {} / {}, properties {:?}",
             model.header.type_id, model.header.type_name, model.header.properties
@@ -238,7 +252,7 @@ async fn main() {
     let mut shadow = true;
     let mut background = backdrop(&res, &fields[field]);
     let mut item = scenery(&res, &objects[object], shadow);
-    let mut anchor = vec2(590., 520.);
+    let mut anchor = vec2(590., 512.);
     let mut grid = std::env::var_os("H4_GRID").is_some();
     // This is a user-selected battle context, independent of resource names.
     let mut on_bridge = std::env::var("H4_BRIDGE").is_ok_and(|v| v == "1");
@@ -309,7 +323,7 @@ async fn main() {
         if reload_field {
             map = preset(&res, &fields[field]);
             selected = Some((51, 51));
-            anchor = vec2(590., 520.);
+            anchor = vec2(590., 512.);
             collision_dirty = true;
             background = backdrop(&res, &fields[field]);
         }
@@ -349,7 +363,7 @@ async fn main() {
                 anchor = if grid {
                     nearest
                         .and_then(|(x, y)| BattlefieldPreset::cell_center(x, y))
-                        .map(|(x, y)| vec2(x as f32, y as f32))
+                        .map(|(x, y)| vec2(x as f32, y as f32 - 8.))
                         .unwrap_or(clicked)
                 } else {
                     clicked
@@ -460,32 +474,31 @@ async fn main() {
                 }
             }
         }
-        if let (true, Ok((models, _))) = (auto, &placer) {
-            // Far obstacles first: sort by the row sum of the footprint's near corner.
-            // (A simple order; the game's depth sorting is not ported.)
-            let mut order: Vec<&ObstaclePlacement> = placed.iter().collect();
-            order.sort_by_key(|p| {
-                let [w, h] = models[p.model].header.properties.map(i32::from);
-                p.at.0 + w + p.at.1 + h
-            });
-            for p in order {
+        // Interleave square pieces of compound models, including the manual
+        // preview. Sorting whole images cannot handle overlapping rectangles.
+        // This is a geometric viewer order; the native depth comparator and
+        // its tie rules have not yet been recovered.
+        let mut draw_order: Vec<(&SceneryPart, Vec2)> = Vec::new();
+        if auto {
+            for p in &placed {
                 if let Some(Ok(sprite)) = sprites.get(&p.model) {
-                    // The image hangs from the top corner of its top-left cell:
-                    // half a cell above that cell's centre.
-                    let (x, y) = (p.at.0 as usize, p.at.1 as usize);
-                    let (cx, cy) = BattlefieldPreset::cell_center(x, y).expect(STORED_CELL);
-                    draw_scenery(
-                        sprite,
-                        vec2(cx as f32, cy as f32 - 8.),
-                        origin,
-                        scale,
-                        elapsed,
+                    // Project directly: a model origin may be outside stored
+                    // rows even when its visible pieces intersect the field.
+                    let at = vec2(
+                        590. + 16. * (p.at.1 - p.at.0) as f32,
+                        512. + 8. * (p.at.0 + p.at.1 - 102) as f32,
                     );
+                    draw_order.extend(sprite.parts.iter().map(|part| (part, at)));
                 }
             }
         }
         if let Ok(item) = &item {
-            draw_scenery(item, anchor, origin, scale, elapsed);
+            draw_order.extend(item.parts.iter().map(|part| (part, anchor)));
+        }
+        draw_order
+            .sort_by(|(a, at_a), (b, at_b)| (at_a.y + a.depth).total_cmp(&(at_b.y + b.depth)));
+        for (part, at) in draw_order {
+            draw_scenery(part, at + part.anchor, origin, scale, elapsed);
         }
         // Keep the collision footprint visible even beneath an opaque sprite.
         if grid {

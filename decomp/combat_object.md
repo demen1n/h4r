@@ -160,3 +160,18 @@ py =  8 * (x + y) - parameter - image.offset.y
 для разбиения координаты слоёв/offset за пределами ±16384 пикселей.
 Другие масштабы, динамика составных объектов и сверка с настоящим боем остаются
 отдельной работой. Автоматическая расстановка — `decomp/obstacle_placement.md`.
+
+
+## Drawing compound scenery in the viewer (1 November)
+
+`h4-battlefield` uploads the cropped image of each `segments()` entry separately.
+Manual scenery and automatic placements share one stable draw queue, ordered by
+the screen Y of each square segment's near corner. The segment's projected
+position and its cropped sequence offset cancel, preserving the original image
+placement; manual grid placement uses the same top cell corner as the placer.
+Empty images are skipped without dropping their collision segments.
+
+This is a geometric preview order, **not an exe-verified depth comparator**.
+Equal depths retain placement/segment order. Shadows remain composed with their
+segment; a separate native shadow pass, tie rules and comparison with a live
+original battle are still outstanding in #56.
