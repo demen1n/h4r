@@ -7,4 +7,5 @@ description = "Animation viewer for Heroes of Might and Magic IV data"
 
 [dependencies]
 h4-formats = { path = "../h4-formats" }
+h4-rules = { path = "../h4-rules" }
 macroquad = "0.4"

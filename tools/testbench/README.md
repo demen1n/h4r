@@ -159,3 +159,18 @@ and finalized damage, without damage dice/modifiers or the full attack command.
 All 896 original answers are in `h4-rules/tests/stone_gaze_vectors.tsv`.
 Unknown remaining eligibility has a separate Rust test and yields `None`, keeping
 the no-bonus behavior of the stand-in battle until spell data is available.
+
+Preset cell overlays have a separate focused fixture:
+
+```sh
+.venv/bin/python -I tools/testbench/preset_cells.py --exe bin/heroes4.exe \
+  --vectors /tmp/preset_cell_vectors.tsv
+```
+
+It executes the native switch at RVA `162bc4..162c2b` and the real terrain
+setter, without patching instructions. All 256 codes, both supplied context
+modes, two initial terrain bytes and three initial flag bytes produce 3,072
+vectors. Compare the output with `crates/h4-rules/tests/preset_cell_vectors.tsv`.
+The normal Rust integration test checks these stored native answers in CI.
+This verifies one cell overlay; context derivation, geometry and row traversal
+are outside the fixture. See `decomp/battlefield.md` for the unresolved context.

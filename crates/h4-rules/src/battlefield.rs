@@ -11,9 +11,41 @@ pub struct CellOccupant {
     pub blocks: bool,
 }
 
+/// The two bytes changed by preset application (RVA 162aa0).
+/// Occupants and the rest of the live cell are unaffected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CellSurface {
+    pub terrain: u8,
+    pub flags: u8,
+}
+
+/// Apply one preset byte to an existing cell, preserving unrelated flags.
+/// `block_zero` is the context byte read by RVA 162aa0; its producer is still
+/// under investigation. Callers must supply it, rather than assume a mode.
+/// Presets are overlays: zero and unrecognized values can leave a cell intact.
+pub fn apply_preset_cell(cell: &mut CellSurface, value: u8, block_zero: bool) {
+    match value {
+        0 if block_zero => cell.flags |= 0x1c,
+        1 => {
+            cell.terrain = 1;
+            cell.flags = (cell.flags & 0xe3) | if block_zero { 0 } else { 0x10 };
+        }
+        2 => {
+            cell.terrain = 1;
+            cell.flags &= 0xe3;
+        }
+        255 => cell.flags = (cell.flags & 0xef) | 0x0c,
+        _ => {}
+    }
+}
+
 /// Port of `t_battlefield_cell::is_blocked` (RVA 183a10).
 /// `flags` is byte +1 of a live battlefield cell, not a preset resource byte.
-pub fn cell_is_blocked(flags: u8, occupants: &[CellOccupant], querying_object: Option<u32>) -> bool {
+pub fn cell_is_blocked(
+    flags: u8,
+    occupants: &[CellOccupant],
+    querying_object: Option<u32>,
+) -> bool {
     flags & 4 != 0
         || occupants
             .iter()
