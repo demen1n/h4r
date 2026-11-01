@@ -1,8 +1,8 @@
-//! Original x86 switch outputs, retained without requiring the game in CI.
+//! Original x86 context constructor + preset application outputs for CI.
 use h4_rules::battlefield::{apply_preset_cell, cell_is_blocked, CellSurface};
 
 #[test]
-fn preset_overlays_match_native_switch_for_every_code() {
+fn preset_overlays_match_native_adventure_context_for_every_code() {
     let mut count = 0;
     for line in include_str!("preset_cell_vectors.tsv").lines() {
         if line.starts_with('#') {
@@ -34,15 +34,15 @@ fn preset_overlays_match_native_switch_for_every_code() {
 
 #[test]
 fn overlays_preserve_or_clear_previous_blocking_in_order() {
-    for context in [false, true] {
+    for on_bridge in [false, true] {
         let mut cell = CellSurface::default();
-        apply_preset_cell(&mut cell, 255, context);
+        apply_preset_cell(&mut cell, 255, on_bridge);
         assert!(cell_is_blocked(cell.flags, &[], None));
-        apply_preset_cell(&mut cell, 0, context);
+        apply_preset_cell(&mut cell, 0, on_bridge);
         assert!(cell_is_blocked(cell.flags, &[], None));
-        apply_preset_cell(&mut cell, 2, context);
+        apply_preset_cell(&mut cell, 2, on_bridge);
         assert!(!cell_is_blocked(cell.flags, &[], None));
-        apply_preset_cell(&mut cell, 0, context);
-        assert_eq!(cell_is_blocked(cell.flags, &[], None), context);
+        apply_preset_cell(&mut cell, 0, on_bridge);
+        assert_eq!(cell_is_blocked(cell.flags, &[], None), on_bridge);
     }
 }

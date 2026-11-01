@@ -1,5 +1,5 @@
-# Native RVA 162bc4..162c2b, rus-3.0 SHA-256 175eacb4838c86e5aee03f31e2406004a06dd238933517e2df40669cf17d36ff
-# code context terrain flags -> terrain flags
+# Native RVA 40e5e0 + 162aa0, rus-3.0 SHA-256 175eacb4838c86e5aee03f31e2406004a06dd238933517e2df40669cf17d36ff
+# code on_bridge terrain flags -> terrain flags
 0 0 0 0 0 0
 0 0 0 165 0 165
 0 0 0 255 0 255
