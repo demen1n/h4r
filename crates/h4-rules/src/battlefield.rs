@@ -128,6 +128,29 @@ pub struct PlacedObstacle {
 }
 
 impl PlacedObstacle {
+    /// Place an image-resolved segment. Each segment needs its own identity.
+    pub fn from_segment(
+        model: &h4_formats::combat_object::CombatObject,
+        segment: &h4_formats::combat_object::CombatObjectSegment,
+        at: (i32, i32),
+        id: u32,
+    ) -> Result<Self, &'static str> {
+        Ok(Self {
+            at: (
+                at.0.checked_add(segment.at.0)
+                    .ok_or("obstacle coordinate overflow")?,
+                at.1.checked_add(segment.at.1)
+                    .ok_or("obstacle coordinate overflow")?,
+            ),
+            footprint: CombatFootprint { size: segment.size },
+            occupant: CellOccupant {
+                id,
+                blocks: model.attributes[0] != 0,
+                skip_blocking: model.flag != 0,
+            },
+        })
+    }
+
     /// A square blocking resource is a single segment in RVA 238690.
     /// Rectangular blocking resources need the image-dependent segment layout;
     /// accepting their bounding rectangle would invent blocked cells.

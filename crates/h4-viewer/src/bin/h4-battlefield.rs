@@ -36,7 +36,7 @@ struct Scenery {
     offset: Vec2,
     fps: f32,
     details: String,
-    collision: Result<Option<PlacedObstacle>, &'static str>,
+    collision: Vec<PlacedObstacle>,
 }
 fn texture(width: i32, height: i32, rgba: &[u8]) -> Result<Texture2D, String> {
     let w = u16::try_from(width).map_err(|_| "invalid image width")?;
@@ -81,9 +81,18 @@ fn scenery(res: &Resources, name: &str, shadow: bool) -> Result<Scenery, String>
         })
         .collect::<Result<Vec<_>, _>>()?;
     let collision = if model.attributes[0] == 0 || model.flag != 0 {
-        Ok(None)
+        Vec::new()
     } else {
-        PlacedObstacle::from_square_model(&model, (0, 0), 1).map(Some)
+        model
+            .segments()
+            .map_err(|e| e.to_string())?
+            .iter()
+            .enumerate()
+            .map(|(i, segment)| {
+                PlacedObstacle::from_segment(&model, segment, (0, 0), i as u32 + 1)
+                    .expect("resource dimensions fit battlefield coordinates")
+            })
+            .collect()
     };
     Ok(Scenery {
         frames,
@@ -257,8 +266,9 @@ async fn main() {
                     on_bridge,
                 );
                 if let (Some(at), Ok(item)) = (selected, &item) {
-                    if let Some(mut obstacle) = item.collision? {
-                        obstacle.at = (at.0 as i32, at.1 as i32);
+                    for &segment in &item.collision {
+                        let mut obstacle = segment;
+                        obstacle.at = (at.0 as i32 + segment.at.0, at.1 as i32 + segment.at.1);
                         grid.add_obstacle(obstacle)?;
                     }
                 }

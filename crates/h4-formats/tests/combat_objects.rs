@@ -3,7 +3,9 @@ use h4_formats::combat_object::CombatObject;
 
 #[test]
 fn installed_objects_read_to_end_and_decode() {
-    let Some(res) = common::resources() else { return };
+    let Some(res) = common::resources() else {
+        return;
+    };
     let names = common::names_with_prefix(&res, "combat_object.");
     let mut failures = Vec::new();
     let mut versions = [0; 3];
@@ -19,6 +21,17 @@ fn installed_objects_read_to_end_and_decode() {
                     .chain(&model.image.base)
                 {
                     let _ = layer.to_rgba();
+                }
+                for segment in model.segments().unwrap() {
+                    for layer in segment
+                        .image
+                        .frames
+                        .iter()
+                        .chain(&segment.image.shadows)
+                        .chain(&segment.image.base)
+                    {
+                        let _ = layer.to_rgba();
+                    }
                 }
             }
             Err(e) => failures.push(format!("{name}: {e}")),

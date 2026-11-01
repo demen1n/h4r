@@ -83,6 +83,87 @@ pub struct Layer {
 }
 
 impl Layer {
+    /// Native scanline crop (RVA 192f20), in layer coordinates. Each pair is
+    /// a half-open horizontal interval; rows outside the mask are discarded.
+    pub(crate) fn crop_scanlines(&self, origin: (i32, i32), lines: &[(i32, i32)]) -> Self {
+        let mut result = self.clone();
+        let top = self.rect.top.max(origin.1);
+        let bottom = self.rect.bottom.min(origin.1 + lines.len() as i32).max(top);
+        let mut rows = Vec::new();
+        let mut left = self.rect.right;
+        let mut right = self.rect.left;
+        let mut first = bottom;
+        let mut last = bottom;
+        for y in top..bottom {
+            let row = self.rows[(y - self.rect.top) as usize];
+            let (a, b) = lines[(y - origin.1) as usize];
+            let mut x0 = (origin.0 + a - self.rect.left).max(i32::from(row.x0));
+            let mut x1 = (origin.0 + b - self.rect.left)
+                .min(i32::from(row.x1))
+                .max(x0);
+            let visible = |x: i32| {
+                let k = row.offset as usize + (x - i32::from(row.x0)) as usize;
+                if !self.alpha.is_empty() {
+                    (self.alpha[k / 2] >> (4 * (k & 1))) & 15 != 0
+                } else {
+                    !self.index0_transparent || self.pixels[k] != 0
+                }
+            };
+            while x0 < x1 && !visible(x0) {
+                x0 += 1;
+            }
+            while x0 < x1 && !visible(x1 - 1) {
+                x1 -= 1;
+            }
+            if x0 < x1 {
+                first = first.min(y);
+                last = y + 1;
+            }
+            // Native bounds continue to include empty row endpoints after
+            // the first stored pixel, even beyond the last nonempty row.
+            if first != bottom {
+                left = left.min(self.rect.left + x0);
+                right = right.max(self.rect.left + x1);
+            }
+            rows.push((x0, x1, row));
+        }
+        if first == bottom {
+            result.rect = Rect {
+                left,
+                right: left,
+                top: bottom,
+                bottom,
+            };
+            result.rows.clear();
+            return result;
+        }
+        result.rect = Rect {
+            left,
+            top: first,
+            right,
+            bottom: last,
+        };
+        result.rows = rows[(first - top) as usize..(last - top) as usize]
+            .iter()
+            .map(|&(a, b, row)| {
+                if a == b {
+                    Row {
+                        x0: 0,
+                        x1: 0,
+                        offset: row.offset,
+                    }
+                } else {
+                    Row {
+                        x0: (self.rect.left + a - left) as u16,
+                        x1: (self.rect.left + b - left) as u16,
+                        offset: row.offset + (a - i32::from(row.x0)) as u32,
+                    }
+                }
+            })
+            .collect();
+        result
+    }
+
     pub(crate) fn read(r: &mut Reader) -> Result<Layer> {
         let palette_size = r.u16()? as usize;
         let has_block_alpha = r.u16()? != 0;
