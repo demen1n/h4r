@@ -280,8 +280,14 @@ fn snapshots_reject_corrupt_cross_references_geometry_hp_and_rng() {
     let mut state = battle();
     let ids = deploy_both(&mut state);
     state.begin_round(&ids).unwrap();
+    state.roll(ids[0].0, ids[1].0, 0);
     let json = state.to_json().unwrap();
     let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert!(matches!(
+        state.events()[3],
+        CombatEvent::RoundStarted { .. }
+    ));
+    assert!(matches!(state.events()[4], CombatEvent::Rolled { .. }));
     let edits = [
         ("/version", serde_json::json!(999)),
         ("/armies/1/source", serde_json::json!(10)),
@@ -295,6 +301,10 @@ fn snapshots_reject_corrupt_cross_references_geometry_hp_and_rng() {
         ("/turns/pending/0", serde_json::json!(999)),
         ("/random/id_modulus", serde_json::json!(0)),
         ("/random/checkpoints", serde_json::json!([0])),
+        // The log must replay to the stored generator and round counter.
+        ("/random/counters", serde_json::json!([])),
+        ("/events/3/RoundStarted/round", serde_json::json!(2)),
+        ("/events/4/Rolled/purpose", serde_json::json!(1)),
     ];
     for (path, replacement) in edits {
         let mut broken = value.clone();
@@ -345,4 +355,40 @@ fn wounded_fixture_keeps_top_hp_shots_and_losses_instead_of_reinitializing() {
         BattleState::from_json(&restored.to_json().unwrap()).unwrap(),
         restored
     );
+}
+
+#[test]
+fn a_side_without_participants_is_rejected() {
+    let mut empty = army(20);
+    empty.army = Army::default();
+    assert!(BattleState::from_armies(&army(10), &empty, &stats(), field(), 1).is_err());
+    assert!(BattleState::from_armies(&empty, &army(10), &stats(), field(), 1).is_err());
+}
+
+#[test]
+fn units_killed_mid_round_stay_loadable_and_lose_their_turn() {
+    let mut state = battle();
+    let ids = deploy_both(&mut state);
+    state.begin_round(&[ids[0], ids[1]]).unwrap();
+    assert_eq!(state.begin_next_turn().unwrap(), Some(ids[0]));
+    // No damage rules yet (#68), so kill the waiting unit in the snapshot.
+    let mut value: serde_json::Value = serde_json::from_str(&state.to_json().unwrap()).unwrap();
+    value["units"][1]["kind"]["Creature"]["count"] = serde_json::json!(0);
+    value["units"][1]["kind"]["Creature"]["top_hp"] = serde_json::json!(0);
+    let mut restored = BattleState::from_json(&value.to_string()).unwrap();
+    assert!(!restored.units()[1].alive());
+    restored.finish_turn().unwrap();
+    assert_eq!(restored.begin_next_turn().unwrap(), None);
+    // The finished round still lists the unit that acted, and reloads.
+    assert_eq!(restored.turns().completed, vec![ids[0]]);
+    assert_eq!(
+        BattleState::from_json(&restored.to_json().unwrap()).unwrap(),
+        restored
+    );
+    // A dead unit cannot be the active one, and the living must be queued.
+    let mut active_dead = value.clone();
+    active_dead["units"][0]["kind"]["Creature"]["count"] = serde_json::json!(0);
+    active_dead["units"][0]["kind"]["Creature"]["top_hp"] = serde_json::json!(0);
+    assert!(BattleState::from_json(&active_dead.to_string()).is_err());
+    restored.begin_round(&[ids[0]]).unwrap();
 }
