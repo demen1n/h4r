@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 description = "State of a Heroes of Might and Magic IV game: map, players, armies, objects"
 
-# No dependencies on purpose: the state is plain data. Reading it from game files is
-# h4-formats' job, changing it is h4-rules' job.
+# The state is plain data. Serde lets battle fixtures retain army IDs and heroes;
+# reading game files is h4-formats' job, changing state is h4-rules' job.
 [dependencies]
+serde = { version = "1.0.229", features = ["derive"] }

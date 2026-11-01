@@ -2,9 +2,10 @@
 //! and the creature numbering the game uses everywhere else (maps, saves, code).
 
 use h4_formats::table::Table;
+use serde::{Deserialize, Serialize};
 
 /// One row of `table.creatures`. Only the columns the rules use so far.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CreatureStats {
     /// Internal name, e.g. `orc`.
     pub keyword: String,

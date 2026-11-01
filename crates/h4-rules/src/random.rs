@@ -16,6 +16,7 @@
 //! it in, so a test can fix the seed and get the same fight every time.
 
 use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
 
 /// One step of the generator: advance `state` and return the new state.
 fn step(state: u32) -> u32 {
@@ -62,7 +63,8 @@ const CHECKPOINT_STEP: u32 = 128;
 /// creatures involved), a `purpose` code that says what the roll is for (0 is the damage
 /// roll, 0x1b defensive luck against spells, 0x1c morale; the exe uses codes 0..=43) and a
 /// counter of how many times this same (ids, purpose) combination has rolled before.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "CombatRandomState", into = "CombatRandomState")]
 pub struct CombatRandom {
     seed: u32,
     /// Ids are reduced modulo this for purposes below 30. In the game it's a field of the
@@ -75,6 +77,40 @@ pub struct CombatRandom {
     checkpoints: Vec<u32>,
 }
 
+/// Portable generator state for deterministic battle fixtures. Checkpoints are
+/// observable state because of the native small-index cache quirk, not just a cache
+/// that may be discarded on load. Counters are sorted rather than a JSON object
+/// with tuple keys, so snapshots have a stable byte representation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CombatRandomState {
+    pub seed: u32,
+    pub id_modulus: u32,
+    pub counters: Vec<CombatRollCounter>,
+    pub checkpoints: Vec<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CombatRollCounter {
+    pub first: u32,
+    pub second: u32,
+    pub purpose: u32,
+    pub count: u32,
+}
+
+impl From<CombatRandom> for CombatRandomState {
+    fn from(random: CombatRandom) -> Self {
+        random.snapshot()
+    }
+}
+
+impl TryFrom<CombatRandomState> for CombatRandom {
+    type Error = &'static str;
+
+    fn try_from(state: CombatRandomState) -> Result<Self, Self::Error> {
+        Self::from_snapshot(state)
+    }
+}
+
 impl CombatRandom {
     /// A fresh generator. In the game the seed is one number from the global generator,
     /// drawn when the battle starts (`GlobalRandom::next`, so 0..=32767).
@@ -82,6 +118,46 @@ impl CombatRandom {
         // The game would divide by zero here; we'd rather refuse early.
         assert!(id_modulus > 0, "id_modulus must be at least 1");
         CombatRandom { seed, id_modulus, counters: HashMap::new(), checkpoints: Vec::new() }
+    }
+
+    pub fn snapshot(&self) -> CombatRandomState {
+        let mut counters: Vec<_> = self.counters.iter().map(|(&(second, purpose, first), &count)| {
+            CombatRollCounter { first, second, purpose, count }
+        }).collect();
+        counters.sort_by_key(|c| (c.second, c.purpose, c.first));
+        CombatRandomState {
+            seed: self.seed,
+            id_modulus: self.id_modulus,
+            counters,
+            checkpoints: self.checkpoints.clone(),
+        }
+    }
+
+    /// Restore without resetting roll counters or the native cache quirk.
+    pub fn from_snapshot(state: CombatRandomState) -> Result<Self, &'static str> {
+        if state.id_modulus == 0 {
+            return Err("combat RNG modulus must be positive");
+        }
+        let mut counters = HashMap::new();
+        for c in state.counters {
+            let modulus = if c.purpose < 30 { state.id_modulus } else { 200 };
+            if c.first >= modulus || c.second >= modulus {
+                return Err("combat RNG counter IDs are not reduced modulo their modulus");
+            }
+            if counters.insert((c.second, c.purpose, c.first), c.count).is_some() {
+                return Err("duplicate combat RNG counter");
+            }
+        }
+        let mut expected = state.seed;
+        for &checkpoint in &state.checkpoints {
+            for _ in 0..CHECKPOINT_STEP {
+                expected = step(expected);
+            }
+            if checkpoint != expected {
+                return Err("combat RNG checkpoint does not match its seed");
+            }
+        }
+        Ok(Self { seed: state.seed, id_modulus: state.id_modulus, counters, checkpoints: state.checkpoints })
     }
 
     /// A number in 0..=32767 for this (first, second, purpose) roll.
@@ -94,7 +170,8 @@ impl CombatRandom {
         let a = first % m;
         let b = second % m;
         let count = self.counters.entry((b, purpose, a)).or_insert(0);
-        *count += 1;
+        // A restored counter can be at u32::MAX; native increments wrap too.
+        *count = count.wrapping_add(1);
         // 44 is the number of purpose codes, so different purposes never share an index.
         // The game computes this in 32-bit integers, hence the wrapping arithmetic.
         let index = purpose

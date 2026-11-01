@@ -1,12 +1,12 @@
 # Third-party dependency inventory
 
-Checked on 2026-10-31 against the exact versions in `Cargo.lock`, using
+Checked on 2026-11-01 against the exact versions in `Cargo.lock`, using
 `cargo metadata --locked --format-version 1` and locally downloaded crate sources.
 The inventory includes target-specific packages, not just the current macOS build.
 
-All 37 external packages declare a GPLv3-compatible permissive license option.
+All 48 external packages declare a GPLv3-compatible permissive license option.
 For this review, MIT can be selected wherever it is offered; `foldhash` and
-`zlib-rs` use Zlib. Older `MIT/Apache-2.0` metadata denotes alternative licenses.
+`zlib-rs` use Zlib. `unicode-ident` additionally includes Unicode-3.0 data terms. Older `MIT/Apache-2.0` metadata denotes alternative licenses.
 These packages retain their upstream licenses; they are not relicensed by h4r.
 
 | Package | Version | Declared license |
@@ -29,11 +29,13 @@ These packages retain their upstream licenses; they are not relicensed by h4r.
 | [glam](https://crates.io/crates/glam/0.27.0) | 0.27.0 | MIT OR Apache-2.0 |
 | [hashbrown](https://crates.io/crates/hashbrown/0.15.5) | 0.15.5 | MIT OR Apache-2.0 |
 | [image](https://crates.io/crates/image/0.24.9) | 0.24.9 | MIT OR Apache-2.0 |
+| [itoa](https://crates.io/crates/itoa/1.0.18) | 1.0.18 | MIT OR Apache-2.0 |
 | [libc](https://crates.io/crates/libc/0.2.191) | 0.2.191 | MIT OR Apache-2.0 |
 | [libm](https://crates.io/crates/libm/0.2.16) | 0.2.16 | MIT |
 | [macroquad](https://crates.io/crates/macroquad/0.4.16) | 0.4.16 | MIT OR Apache-2.0 |
 | [macroquad_macro](https://crates.io/crates/macroquad_macro/0.1.8) | 0.1.8 | MIT/Apache-2.0 |
 | [malloc_buf](https://crates.io/crates/malloc_buf/0.0.6) | 0.0.6 | MIT |
+| [memchr](https://crates.io/crates/memchr/2.8.3) | 2.8.3 | Unlicense OR MIT |
 | [miniquad](https://crates.io/crates/miniquad/0.4.11) | 0.4.11 | MIT OR Apache-2.0 |
 | [miniz_oxide](https://crates.io/crates/miniz_oxide/0.8.9) | 0.8.9 | MIT OR Zlib OR Apache-2.0 |
 | [miniz_oxide](https://crates.io/crates/miniz_oxide/0.9.1) | 0.9.1 | MIT OR Zlib OR Apache-2.0 |
@@ -41,13 +43,22 @@ These packages retain their upstream licenses; they are not relicensed by h4r.
 | [num-traits](https://crates.io/crates/num-traits/0.2.19) | 0.2.19 | MIT OR Apache-2.0 |
 | [objc-rs](https://crates.io/crates/objc-rs/0.2.8) | 0.2.8 | MIT |
 | [png](https://crates.io/crates/png/0.17.16) | 0.17.16 | MIT OR Apache-2.0 |
+| [proc-macro2](https://crates.io/crates/proc-macro2/1.0.107) | 1.0.107 | MIT OR Apache-2.0 |
 | [quad-rand](https://crates.io/crates/quad-rand/0.2.3) | 0.2.3 | MIT |
+| [quote](https://crates.io/crates/quote/1.0.47) | 1.0.47 | MIT OR Apache-2.0 |
+| [serde](https://crates.io/crates/serde/1.0.229) | 1.0.229 | MIT OR Apache-2.0 |
+| [serde_core](https://crates.io/crates/serde_core/1.0.229) | 1.0.229 | MIT OR Apache-2.0 |
+| [serde_derive](https://crates.io/crates/serde_derive/1.0.229) | 1.0.229 | MIT OR Apache-2.0 |
+| [serde_json](https://crates.io/crates/serde_json/1.0.154) | 1.0.154 | MIT OR Apache-2.0 |
 | [simd-adler32](https://crates.io/crates/simd-adler32/0.3.10) | 0.3.10 | MIT |
+| [syn](https://crates.io/crates/syn/3.0.9) | 3.0.9 | MIT OR Apache-2.0 |
 | [ttf-parser](https://crates.io/crates/ttf-parser/0.25.1) | 0.25.1 | MIT OR Apache-2.0 |
+| [unicode-ident](https://crates.io/crates/unicode-ident/1.0.27) | 1.0.27 | (MIT OR Apache-2.0) AND Unicode-3.0 |
 | [winapi](https://crates.io/crates/winapi/0.3.9) | 0.3.9 | MIT/Apache-2.0 |
 | [winapi-i686-pc-windows-gnu](https://crates.io/crates/winapi-i686-pc-windows-gnu/0.4.0) | 0.4.0 | MIT/Apache-2.0 |
 | [winapi-x86_64-pc-windows-gnu](https://crates.io/crates/winapi-x86_64-pc-windows-gnu/0.4.0) | 0.4.0 | MIT/Apache-2.0 |
 | [zlib-rs](https://crates.io/crates/zlib-rs/0.6.8) | 0.6.8 | Zlib |
+| [zmij](https://crates.io/crates/zmij/1.0.23) | 1.0.23 | MIT |
 
 ## Embedded material and distribution notices
 
