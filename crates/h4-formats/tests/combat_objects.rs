@@ -12,7 +12,7 @@ fn installed_objects_read_to_end_and_decode() {
     for name in &names {
         match res.read(name).and_then(|b| CombatObject::read(&b)) {
             Ok(model) => {
-                versions[model.version as usize] += 1;
+                versions[model.header.version as usize] += 1;
                 for layer in model
                     .image
                     .frames
@@ -62,10 +62,10 @@ fn versions_and_corrupt_input() {
         data.extend_from_slice(&(-8_i32).to_le_bytes());
         data.extend_from_slice(&12_i32.to_le_bytes());
         let model = CombatObject::read(&data).unwrap();
-        assert_eq!(model.properties, [3, if version == 2 { 7 } else { 3 }]);
-        assert_eq!(model.frames_per_second, 10);
+        assert_eq!(model.header.properties, [3, if version == 2 { 7 } else { 3 }]);
+        assert_eq!(model.header.frames_per_second, 10);
         assert_eq!(model.image.offset, (-8, 12));
-        assert_eq!(model.type_name, if version == 0 { "" } else { "rock" });
+        assert_eq!(model.header.type_name, if version == 0 { "" } else { "rock" });
         for end in 0..data.len() {
             assert!(CombatObject::read(&data[..end]).is_err());
         }

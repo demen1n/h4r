@@ -15,16 +15,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for name in &names {
         match CombatObject::read(&resources.read(name)?) {
             Ok(model) => {
-                versions[model.version as usize] += 1;
+                versions[model.header.version as usize] += 1;
                 let segments = model.segments()?;
                 segment_count += segments.len();
                 if segments.len() > 1 {
                     compound_count += 1;
-                    if !showed_example && model.attributes[0] != 0 && model.flag == 0 {
+                    if !showed_example && model.blocks() && !model.skips_blocking() {
                         showed_example = true;
                         println!(
                             "compound example: {name}, {:?}, {} segments",
-                            model.properties,
+                            model.header.properties,
                             segments.len()
                         );
                     }

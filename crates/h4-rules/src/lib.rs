@@ -14,6 +14,8 @@
 //! - [`new_game`]: the [`h4_state::GameState`] of a map on day 1.
 //! - [`movement`]: armies walking on the map: step costs, movement points, paths.
 //! - [`turns`]: ending a turn and what a new day brings.
+//! - [`battlefield`]: combat field cells, presets and obstacle footprints.
+//! - [`obstacle_placement`]: random scenery on a combat field.
 
 pub mod artifacts;
 pub mod battle;
@@ -24,6 +26,7 @@ pub mod effects;
 pub mod heroes;
 pub mod movement;
 pub mod new_game;
+pub mod obstacle_placement;
 pub mod placement;
 pub mod random;
 pub mod turns;

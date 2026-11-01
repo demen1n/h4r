@@ -1,12 +1,64 @@
 //! Inspect preset backdrops and combat scenery; this is not a playable battle.
 use h4_formats::archive::{data_dir, Resources};
-use h4_formats::battlefield::BattlefieldPreset;
-use h4_formats::combat_object::CombatObject;
+use h4_formats::battlefield::{BattlefieldPreset, BattlefieldRow};
+use std::collections::HashMap;
+
+use h4_formats::combat_object::{CombatHeaderEntry, CombatHeaderTable, CombatObject};
 use h4_formats::sprite::Rect;
+use h4_formats::table::Table;
 use h4_rules::battlefield::{
-    apply_preset_cell, cell_is_blocked, BattlefieldGrid, CellSurface, PlacedObstacle,
+    apply_preset_cell, cell_is_blocked, BattlefieldGrid, CellSurface, PlacedObstacle, FLAG_10,
 };
+use h4_rules::obstacle_placement::{
+    place_obstacles, ObstaclePlacement, ObstacleWeights, PlacerContext,
+};
+use h4_rules::random::CombatRandom;
 use macroquad::prelude::*;
+
+/// Ground under the backdrop for automatic obstacles (T cycles): terrain id and name.
+/// The game takes it from the adventure map around the battle; not ported yet.
+const GROUNDS: [(u8, &str); 9] = [
+    (1, "grass"),
+    (2, "rough"),
+    (3, "swamp"),
+    (4, "volcanic"),
+    (5, "snow"),
+    (6, "sand"),
+    (7, "dirt"),
+    (8, "subterranean"),
+    (0, "water"),
+];
+
+/// Cached obstacle headers and the weights table, for the obstacle placer.
+fn placer_inputs(res: &Resources) -> Result<(Vec<CombatHeaderEntry>, ObstacleWeights), String> {
+    let headers = res
+        .read(CombatHeaderTable::RESOURCE)
+        .and_then(|b| CombatHeaderTable::read(&b))
+        .map_err(|e| e.to_string())?;
+    let table = res
+        .read("table.combat_obstacles.h4d")
+        .and_then(|b| Table::read(&b, "combat_obstacles"))
+        .map_err(|e| e.to_string())?;
+    Ok((headers.entries, ObstacleWeights::from_table(&table)))
+}
+
+/// Draw one frame of a scenery model with its image anchored at `anchor`
+/// (battlefield pixels).
+fn draw_scenery(item: &Scenery, anchor: Vec2, origin: Vec2, scale: f32, elapsed: f32) {
+    let index = (elapsed * item.fps) as usize % item.frames.len();
+    let pos =
+        origin + (anchor + item.offset + vec2(item.area.left as f32, item.area.top as f32)) * scale;
+    draw_texture_ex(
+        &item.frames[index],
+        pos.x,
+        pos.y,
+        WHITE,
+        DrawTextureParams {
+            dest_size: Some(vec2(item.area.width() as f32, item.area.height() as f32) * scale),
+            ..Default::default()
+        },
+    );
+}
 
 // Every (x, y) the viewer iterates comes from the preset's stored row bounds,
 // which lie inside the 102×102 field, so cell lookups cannot fail.
@@ -52,7 +104,33 @@ fn texture(width: i32, height: i32, rgba: &[u8]) -> Result<Texture2D, String> {
     t.set_filter(FilterMode::Nearest);
     Ok(t)
 }
+/// Name of the first list entry: an ordinary battle, which has no preset.
+const NO_PRESET: &str = "(no preset: ordinary battle)";
+
+/// The preset map of a list entry; for `NO_PRESET` a preset of zeros, which
+/// leaves every cell as the underlying ground.
+fn preset(res: &Resources, name: &str) -> Option<BattlefieldPreset> {
+    if name == NO_PRESET {
+        let rows = h4_formats::battlefield::row_bounds()
+            .map(|(start, end)| BattlefieldRow {
+                start,
+                cells: vec![0; end - start],
+            })
+            .collect();
+        return Some(BattlefieldPreset {
+            rows,
+            layers: Vec::new(),
+        });
+    }
+    res.read(name)
+        .and_then(|b| BattlefieldPreset::read(&b))
+        .ok()
+}
+
 fn backdrop(res: &Resources, name: &str) -> Result<Vec<Backdrop>, String> {
+    if name == NO_PRESET {
+        return Ok(Vec::new());
+    }
     let model = res
         .read(name)
         .and_then(|b| BattlefieldPreset::read(&b))
@@ -103,10 +181,10 @@ fn scenery(res: &Resources, name: &str, shadow: bool) -> Result<Scenery, String>
         area,
         collision,
         offset: vec2(model.image.offset.0 as f32, model.image.offset.1 as f32),
-        fps: f32::from(model.frames_per_second.max(1)),
+        fps: f32::from(model.header.frames_per_second.max(1)),
         details: format!(
             "type {} / {}, properties {:?}",
-            model.type_id, model.type_name, model.properties
+            model.header.type_id, model.header.type_name, model.header.properties
         ),
     })
 }
@@ -136,7 +214,8 @@ async fn main() {
             return;
         }
     };
-    let fields = names(&res, "battlefield_preset_map.");
+    let mut fields = names(&res, "battlefield_preset_map.");
+    fields.insert(0, NO_PRESET.to_string());
     let objects = names(&res, "combat_object.");
     if fields.is_empty() || objects.is_empty() {
         eprintln!("no battlefield or scenery resources");
@@ -164,12 +243,20 @@ async fn main() {
     // This is a user-selected battle context, independent of resource names.
     let mut on_bridge = std::env::var("H4_BRIDGE").is_ok_and(|v| v == "1");
     let mut selected = Some((51, 51));
-    let mut map = res
-        .read(&fields[field])
-        .and_then(|b| BattlefieldPreset::read(&b))
-        .ok();
+    let mut map = preset(&res, &fields[field]);
     let mut collision = None;
     let mut collision_dirty = true;
+    // Automatic obstacles (O): the original placer on the current backdrop.
+    let placer = placer_inputs(&res);
+    let mut auto = std::env::var("H4_OBSTACLES").is_ok_and(|v| v == "1");
+    let mut seed: u32 = std::env::var("H4_SEED")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1);
+    let mut ground = 0;
+    let mut placed: Vec<ObstaclePlacement> = Vec::new();
+    // Sprites of placed models, by model index; loaded on first use.
+    let mut sprites: HashMap<usize, Result<Scenery, String>> = HashMap::new();
     let mut paused = false;
     let mut elapsed = 0.;
     let mut ticks = 0;
@@ -194,6 +281,20 @@ async fn main() {
         if is_key_pressed(KeyCode::S) {
             shadow = !shadow;
             reload_item = true;
+            sprites.clear();
+        }
+        if is_key_pressed(KeyCode::O) {
+            auto = !auto;
+            collision_dirty = true;
+        }
+        if is_key_pressed(KeyCode::R) {
+            // Another battle seed (the game draws one number 0..32767).
+            seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345) % 32_768;
+            collision_dirty = true;
+        }
+        if is_key_pressed(KeyCode::T) {
+            ground = (ground + 1) % GROUNDS.len();
+            collision_dirty = true;
         }
         if is_key_pressed(KeyCode::Space) {
             paused = !paused;
@@ -206,10 +307,7 @@ async fn main() {
             grid = !grid;
         }
         if reload_field {
-            map = res
-                .read(&fields[field])
-                .and_then(|b| BattlefieldPreset::read(&b))
-                .ok();
+            map = preset(&res, &fields[field]);
             selected = Some((51, 51));
             anchor = vec2(590., 520.);
             collision_dirty = true;
@@ -224,9 +322,9 @@ async fn main() {
             elapsed += get_frame_time();
         }
         let scale = (screen_width() / 1180.)
-            .min((screen_height() - 160.) / 1024.)
+            .min((screen_height() - 184.) / 1024.)
             .max(0.01);
-        let origin = vec2((screen_width() - 1180. * scale) / 2., 160.);
+        let origin = vec2((screen_width() - 1180. * scale) / 2., 184.);
         if is_mouse_button_pressed(MouseButton::Left) {
             let mouse = mouse_position();
             let clicked = (vec2(mouse.0, mouse.1) - origin) / scale;
@@ -260,15 +358,40 @@ async fn main() {
         }
         // A blank underlying field is explicit; terrain generation is separate.
         if collision_dirty {
+            placed.clear();
             collision = map.as_ref().map(|map| {
                 let mut grid = BattlefieldGrid::from_preset(
                     map,
                     CellSurface {
-                        terrain: 1,
-                        flags: 0x10,
+                        terrain: GROUNDS[ground].0,
+                        flags: FLAG_10,
                     },
                     on_bridge,
                 );
+                grid.block_edges();
+                if let (true, Ok((models, weights))) = (auto, &placer) {
+                    let context = PlacerContext {
+                        on_bridge,
+                        ..Default::default()
+                    };
+                    let mut random = CombatRandom::new(seed, 1);
+                    placed = place_obstacles(&grid, models, weights, &context, &mut random);
+                    for (k, p) in placed.iter().enumerate() {
+                        let name = format!("combat_object.{}.h4d", models[p.model].name);
+                        let sprite = sprites
+                            .entry(p.model)
+                            .or_insert_with(|| scenery(&res, &name, shadow));
+                        if let Ok(sprite) = sprite {
+                            for (i, &segment) in sprite.collision.iter().enumerate() {
+                                let mut obstacle = segment;
+                                obstacle.at = (p.at.0 + segment.at.0, p.at.1 + segment.at.1);
+                                // Manual scenery uses small ids; these start at 1000.
+                                obstacle.occupant.id = 1000 + 64 * k as u32 + i as u32;
+                                grid.add_obstacle(obstacle)?;
+                            }
+                        }
+                    }
+                }
                 if let (Some(at), Ok(item)) = (selected, &item) {
                     for &segment in &item.collision {
                         let mut obstacle = segment;
@@ -337,23 +460,32 @@ async fn main() {
                 }
             }
         }
+        if let (true, Ok((models, _))) = (auto, &placer) {
+            // Far obstacles first: sort by the row sum of the footprint's near corner.
+            // (A simple order; the game's depth sorting is not ported.)
+            let mut order: Vec<&ObstaclePlacement> = placed.iter().collect();
+            order.sort_by_key(|p| {
+                let [w, h] = models[p.model].header.properties.map(i32::from);
+                p.at.0 + w + p.at.1 + h
+            });
+            for p in order {
+                if let Some(Ok(sprite)) = sprites.get(&p.model) {
+                    // The image hangs from the top corner of its top-left cell:
+                    // half a cell above that cell's centre.
+                    let (x, y) = (p.at.0 as usize, p.at.1 as usize);
+                    let (cx, cy) = BattlefieldPreset::cell_center(x, y).expect(STORED_CELL);
+                    draw_scenery(
+                        sprite,
+                        vec2(cx as f32, cy as f32 - 8.),
+                        origin,
+                        scale,
+                        elapsed,
+                    );
+                }
+            }
+        }
         if let Ok(item) = &item {
-            let index = (elapsed * item.fps) as usize % item.frames.len();
-            let pos = origin
-                + (anchor + item.offset + vec2(item.area.left as f32, item.area.top as f32))
-                    * scale;
-            draw_texture_ex(
-                &item.frames[index],
-                pos.x,
-                pos.y,
-                WHITE,
-                DrawTextureParams {
-                    dest_size: Some(
-                        vec2(item.area.width() as f32, item.area.height() as f32) * scale,
-                    ),
-                    ..Default::default()
-                },
-            );
+            draw_scenery(item, anchor, origin, scale, elapsed);
         }
         // Keep the collision footprint visible even beneath an opaque sprite.
         if grid {
@@ -386,6 +518,15 @@ async fn main() {
             objects[object].clone(),
             item.as_ref().map(|s| s.details.clone()).unwrap_or_else(|e| e.clone()),
             "Left/Right field | Up/Down object | G grid | B bridge mode | Space pause | S shadow | Esc exit".into(),
+            match &placer {
+                Ok(_) if auto => format!(
+                    "O automatic obstacles: {} (R seed {seed}, T ground {})",
+                    placed.len(),
+                    GROUNDS[ground].1
+                ),
+                Ok(_) => "O automatic obstacles: off".into(),
+                Err(e) => format!("automatic obstacles unavailable: {e}"),
+            },
             format!("Battle on bridge: {} | red preset, pink scenery, green clear, orange inherited", if on_bridge { "yes" } else { "no" }),
         ]
         .iter()
@@ -410,10 +551,10 @@ async fn main() {
             })
         });
         if let Some(status) = status {
-            draw_text(&status, 10., 142., 18., YELLOW);
+            draw_text(&status, 10., 166., 18., YELLOW);
         }
         if let Err(e) = &background {
-            draw_text(e, 10., 160., 20., RED);
+            draw_text(e, 10., 184., 20., RED);
         }
         ticks += 1;
         if ticks == 3 {

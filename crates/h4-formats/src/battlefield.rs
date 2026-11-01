@@ -4,6 +4,21 @@ use crate::reader::{bad, Reader};
 use crate::sprite::Layer;
 use crate::Result;
 
+/// Rows (and cells per row) of every combat field: 102×102 cells, of which
+/// only a diamond fits the 1180×1024 picture.
+pub const FIELD_SIZE: usize = 102;
+
+/// Half-open cell range `start..end` of each of the `FIELD_SIZE` rows.
+/// From base_initialize (34db60): centered 1180x1024 rectangle, 102 isometric
+/// rows, step 16.
+pub fn row_bounds() -> impl Iterator<Item = (usize, usize)> {
+    (0_i32..FIELD_SIZE as i32).map(|x| {
+        let start = (37 - x).max(x - 37).max(0);
+        let end = (38 + x).min(166 - x).min(102).max(start);
+        (start as usize, end as usize)
+    })
+}
+
 #[derive(Debug, Clone)]
 pub struct BattlefieldRow {
     pub start: usize,
@@ -42,17 +57,12 @@ impl BattlefieldPreset {
         if header != [1, 1, 102, 16, 1180, 1024] {
             return bad(format!("unsupported battlefield header {header:?}"));
         }
-        let mut rows = Vec::with_capacity(102);
-        // From base_initialize (34db60): centered 1180x1024 rectangle,
-        // 102 isometric rows, step 16. Bounds are half-open.
-        for y in 0_i32..102 {
-            let start = (37 - y).max(y - 37).max(0) as usize;
-            let end = (38 + y).min(166 - y).min(102).max(start as i32) as usize;
-            rows.push(BattlefieldRow {
+        let mut rows: Vec<BattlefieldRow> = row_bounds()
+            .map(|(start, end)| BattlefieldRow {
                 start,
                 cells: vec![0; end - start],
-            });
-        }
+            })
+            .collect();
         // The executable stores rows in descending order.
         for row in rows.iter_mut().rev() {
             let bytes = r.take(row.cells.len())?;
