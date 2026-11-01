@@ -8,6 +8,10 @@ use h4_rules::battlefield::{
 };
 use macroquad::prelude::*;
 
+// Every (x, y) the viewer iterates comes from the preset's stored row bounds,
+// which lie inside the 102×102 field, so cell lookups cannot fail.
+const STORED_CELL: &str = "coordinates come from stored preset rows";
+
 // Zero inherits earlier overlays on land, but blocks outside the bridge deck.
 // Scenery shown in this resource viewer is excluded from the cell query.
 fn preset_status(value: u8, on_bridge: bool) -> (&'static str, Color) {
@@ -80,7 +84,7 @@ fn scenery(res: &Resources, name: &str, shadow: bool) -> Result<Scenery, String>
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let collision = if model.attributes[0] == 0 || model.flag != 0 {
+    let collision = if !model.blocks() || model.skips_blocking() {
         Vec::new()
     } else {
         model
@@ -235,8 +239,8 @@ async fn main() {
                             (row.start..row.start + row.cells.len()).map(move |y| (x, y))
                         })
                         .min_by(|&(ax, ay), &(bx, by)| {
-                            let a = BattlefieldPreset::cell_center(ax, ay).unwrap();
-                            let b = BattlefieldPreset::cell_center(bx, by).unwrap();
+                            let a = BattlefieldPreset::cell_center(ax, ay).expect(STORED_CELL);
+                            let b = BattlefieldPreset::cell_center(bx, by).expect(STORED_CELL);
                             vec2(a.0 as f32, a.1 as f32)
                                 .distance_squared(clicked)
                                 .total_cmp(&vec2(b.0 as f32, b.1 as f32).distance_squared(clicked))
@@ -297,10 +301,11 @@ async fn main() {
             if let Some(map) = &map {
                 for (x, row) in map.rows.iter().enumerate() {
                     for y in row.start..row.start + row.cells.len() {
-                        let (cx, cy) = BattlefieldPreset::cell_center(x, y).unwrap();
+                        let (cx, cy) = BattlefieldPreset::cell_center(x, y).expect(STORED_CELL);
                         let center = origin + vec2(cx as f32, cy as f32) * scale;
                         let corners = [vec2(-16., 0.), vec2(0., -8.), vec2(16., 0.), vec2(0., 8.)];
-                        let (_, base_color) = preset_status(map.cell(x, y).unwrap(), on_bridge);
+                        let (_, base_color) =
+                            preset_status(map.cell(x, y).expect(STORED_CELL), on_bridge);
                         let color = match &collision {
                             Some(Ok(grid))
                                 if grid
@@ -361,7 +366,7 @@ async fn main() {
                         {
                             continue;
                         }
-                        let (cx, cy) = BattlefieldPreset::cell_center(x, y).unwrap();
+                        let (cx, cy) = BattlefieldPreset::cell_center(x, y).expect(STORED_CELL);
                         let center = origin + vec2(cx as f32, cy as f32) * scale;
                         let corners = [vec2(-16., 0.), vec2(0., -8.), vec2(16., 0.), vec2(0., 8.)];
                         for i in 0..4 {

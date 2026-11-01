@@ -30,24 +30,52 @@ pub struct CombatObjectSegment {
     pub image: ActorSequence,
 }
 
+/// Two type ids that RVA 238690 never splits into 1×1 pieces, even when the
+/// model does not block. Their names in the type enum are not resolved yet;
+/// 0x25 is also the type the reader assumes for version 0 resources.
+const UNSPLIT_TYPE_IDS: [u16; 2] = [0x23, 0x25];
+
 impl CombatObject {
+    /// Static blocking predicate: the first extra byte (virtual +0x10, RVA 477620).
+    pub fn blocks(&self) -> bool {
+        self.attributes[0] != 0
+    }
+
+    /// The resource flag: a nonzero value makes the cell query ignore the
+    /// object (virtual +0x5c, RVA 477660).
+    pub fn skips_blocking(&self) -> bool {
+        self.flag != 0
+    }
+
+    /// Side of one square segment in cells, as chosen by RVA 238690.
+    ///
+    /// Non-blocking, non-skipped models of ordinary types are cut into 1×1
+    /// pieces. Everything else uses the largest square that tiles the model
+    /// exactly: the greatest common divisor of width and height. A square
+    /// model therefore stays a single segment. With a zero side the result is
+    /// the other side (gcd(n, 0) = n), as in the executable.
+    pub fn segment_size(&self) -> u8 {
+        if !self.blocks() && !self.skips_blocking() && !UNSPLIT_TYPE_IDS.contains(&self.type_id) {
+            return 1;
+        }
+        // Euclid's algorithm for the greatest common divisor.
+        let [mut a, mut b] = self.properties;
+        while b != 0 {
+            (a, b) = (b, a % b);
+        }
+        a
+    }
+
     /// RVA 238690 at native image scale 1.0. All layers, including shadows,
     /// participate in deciding whether a segment exists.
     pub fn segments(&self) -> Result<Vec<CombatObjectSegment>> {
         let [width, height] = self.properties.map(i32::from);
-        let size =
-            if self.attributes[0] == 0 && self.flag == 0 && !matches!(self.type_id, 0x23 | 0x25) {
-                1
-            } else {
-                let (mut a, mut b) = (width, height);
-                while b != 0 {
-                    (a, b) = (b, a % b);
-                }
-                a
-            };
+        let size = i32::from(self.segment_size());
+        // A model that stays one square, or has a zero side, takes the
+        // executable's short path: no cropping, even with an empty image.
         if (size == width && size == height) || width == 0 || height == 0 {
             return Ok(vec![CombatObjectSegment {
-                size: size as u8,
+                size: self.segment_size(),
                 at: (0, 0),
                 image: self.image.clone(),
             }]);
@@ -70,15 +98,23 @@ impl CombatObject {
         if coordinates.iter().any(|&v| i64::from(v).abs() > 16384) {
             return bad("combat object segmentation coordinates exceed 16384 pixels");
         }
+        // Map cell corner (x, y) -> image pixel. One cell is a 32×16 diamond;
+        // `parameter` lifts the cutting plane (decomp/combat_object.md).
         let elevation = i32::from(self.parameter);
         let project = |x, y| (16 * (y - x) - ox, 8 * (x + y) - elevation - oy);
         let mut segments = Vec::new();
         for x in (0..width).step_by(size as usize) {
             for y in (0..height).step_by(size as usize) {
+                // Diamond corners of this segment: a = top, b = left,
+                // c = right, d = bottom (only the needed coordinates).
                 let (ax, ay) = project(x, y);
                 let (bx, by) = project(x + size, y);
                 let (cx, _) = project(x, y + size);
                 let (_, dy) = project(x + size, y + size);
+                // One half-open [left, right) interval per image row, relative
+                // to `area.left`. Sides on the outer edge of the model extend
+                // to the edge of the whole image, so overhanging parts of the
+                // picture (a tree crown, a shadow) stay with an edge segment.
                 let mut lines = Vec::new();
                 let top = if x == 0 && y == 0 {
                     lines.extend(std::iter::repeat_n(
@@ -89,6 +125,7 @@ impl CombatObject {
                 } else {
                     ay
                 };
+                // Upper half of the diamond: widens by 2 pixels per row.
                 for i in 0..by - ay {
                     let d = 2 * (i + 1);
                     lines.push((
@@ -100,6 +137,7 @@ impl CombatObject {
                         },
                     ));
                 }
+                // Lower half: narrows by 2 pixels per row.
                 for i in 0..dy - by {
                     let d = 2 * (i + 1);
                     lines.push((
@@ -169,7 +207,7 @@ impl CombatObject {
                     .reduce(|a, b| a.union(&b));
                 if rect.is_some_and(|r| r.left != r.right) {
                     segments.push(CombatObjectSegment {
-                        size: size as u8,
+                        size: self.segment_size(),
                         at: (x, y),
                         image,
                     });
