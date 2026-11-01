@@ -139,7 +139,10 @@ fn occupied_ids(field: &BattlefieldGrid) -> BTreeSet<u32> {
     for x in 0..field.row_count() as i32 {
         if let Some((start, end)) = field.row_bounds(x) {
             for y in start..end {
-                ids.extend(field.cell(x, y).unwrap().occupants.iter().map(|o| o.id));
+                let cell = field
+                    .cell(x, y)
+                    .expect("y comes from row_bounds(x), so the cell exists");
+                ids.extend(cell.occupants.iter().map(|o| o.id));
             }
         }
     }
@@ -245,6 +248,9 @@ impl BattleState {
                     kind,
                     position: None,
                 });
+            }
+            if army.slots.iter().all(Option::is_none) {
+                return Err("each side needs at least one battle participant".into());
             }
             armies.push(army);
         }
@@ -358,16 +364,20 @@ impl BattleState {
         Ok(())
     }
 
+    /// Units killed while waiting for their turn are dropped from the queue
+    /// here: a dead stack cannot act. They stay listed if they already moved.
     pub fn begin_next_turn(&mut self) -> Result<Option<UnitId>, String> {
         if self.data.turns.active.is_some() {
             return Err("finish the active turn first".into());
         }
-        let unit = self.data.turns.pending.pop_front();
-        if let Some(unit) = unit {
-            self.data.turns.active = Some(unit);
-            self.data.events.push(CombatEvent::TurnStarted { unit });
+        while let Some(unit) = self.data.turns.pending.pop_front() {
+            if self.unit(unit).is_some_and(BattleUnit::alive) {
+                self.data.turns.active = Some(unit);
+                self.data.events.push(CombatEvent::TurnStarted { unit });
+                return Ok(Some(unit));
+            }
         }
-        Ok(unit)
+        Ok(None)
     }
 
     pub fn finish_turn(&mut self) -> Result<UnitId, String> {
@@ -384,6 +394,8 @@ impl BattleState {
 
     /// Dice and their observable counters belong to the battle. Record each
     /// result so the same action stream can be compared after fixture reload.
+    /// This is the only way the battle's generator is used, which is why
+    /// loading a snapshot can replay the logged rolls and check the generator.
     pub fn roll(&mut self, first: u32, second: u32, purpose: u32) -> u32 {
         let value = self.data.random.roll(first, second, purpose);
         self.data.events.push(CombatEvent::Rolled {
@@ -467,6 +479,13 @@ impl BattleState {
         if data.armies[0].slots != slots[0] || data.armies[1].slots != slots[1] {
             return Err("army slots do not match battle units".into());
         }
+        if data
+            .armies
+            .iter()
+            .any(|a| a.slots.iter().all(Option::is_none))
+        {
+            return Err("each side needs at least one battle participant".into());
+        }
         let random = data.random.snapshot();
         if ids.iter().any(|id| id.0 >= random.id_modulus) {
             return Err("battle unit IDs exceed the combat RNG modulus".into());
@@ -477,7 +496,10 @@ impl BattleState {
         let mut unit_cells: BTreeMap<UnitId, BTreeSet<(i32, i32)>> = BTreeMap::new();
         for (x, &(start, end)) in bounds.iter().enumerate() {
             for y in start..end {
-                let cell = data.field.cell(x as i32, y as i32).unwrap();
+                let cell = data
+                    .field
+                    .cell(x as i32, y as i32)
+                    .expect("the geometry check above matched these bounds");
                 let mut seen = BTreeSet::new();
                 for occupant in &cell.occupants {
                     if !seen.insert(occupant.id)
@@ -547,16 +569,51 @@ impl BattleState {
             .filter(|u| u.alive())
             .map(|u| u.id)
             .collect();
+        // Units that died during the round may still be listed (pending or
+        // completed), so the queue must cover the living, not equal them.
         if (turns.round == 0 && !queue.is_empty())
             || (turns.round > 0
-                && (queued != alive
+                && (!queued.is_subset(&ids)
+                    || !alive.is_subset(&queued)
                     || queue.len() != queued.len()
+                    || turns.active.is_some_and(|id| !alive.contains(&id))
                     || data.units.iter().any(|u| u.alive() && u.position.is_none())))
         {
             return Err("invalid battle turn queue".into());
         }
         if data.events.first() != Some(&CombatEvent::Created { seed: random.seed }) {
             return Err("battle log must begin with its creation seed".into());
+        }
+        // Replay every logged roll on a fresh generator: the values and the
+        // final counters/checkpoints must match what the snapshot stores.
+        let mut replay = CombatRandom::new(random.seed, random.id_modulus);
+        let mut rounds = 0;
+        for event in &data.events {
+            match event {
+                CombatEvent::Rolled {
+                    first,
+                    second,
+                    purpose,
+                    value,
+                } => {
+                    if replay.roll(*first, *second, *purpose) != *value {
+                        return Err("logged roll does not match the battle seed".into());
+                    }
+                }
+                CombatEvent::RoundStarted { round, .. } => {
+                    rounds += 1;
+                    if *round != rounds {
+                        return Err("battle rounds must be logged in order".into());
+                    }
+                }
+                _ => {}
+            }
+        }
+        if rounds != turns.round {
+            return Err("battle log does not match the round counter".into());
+        }
+        if replay != data.random {
+            return Err("combat RNG state does not match the logged rolls".into());
         }
         for event in &data.events {
             let valid = match event {
@@ -566,10 +623,8 @@ impl BattleState {
                 CombatEvent::TurnStarted { unit } | CombatEvent::TurnFinished { unit } => {
                     ids.contains(unit)
                 }
-                CombatEvent::RoundStarted { round, order } => {
-                    *round > 0 && *round <= turns.round && order.iter().all(|id| ids.contains(id))
-                }
-                CombatEvent::Rolled { value, .. } => *value <= 32767,
+                CombatEvent::RoundStarted { order, .. } => order.iter().all(|id| ids.contains(id)),
+                CombatEvent::Rolled { .. } => true,
                 CombatEvent::Created { seed } => *seed == random.seed,
             };
             if !valid {
