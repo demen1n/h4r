@@ -159,7 +159,7 @@ Optional environment variables:
 cargo run --release -p h4-viewer --bin h4-battlefield -- "/path/to/Heroes IV/data"
 ```
 
-Left/right selects a backdrop, up/down selects scenery, and clicking places its anchor (yellow cross). `G` toggles the grid and snapping, `Space` pauses animation, `S` toggles shadows, and `Esc` exits. `H4_GRID=1` enables the grid on startup. Rendering preserves layer coordinates and the stored animation offset. `H4_SCREENSHOT=out.png` captures a frame and exits. Grid colors show the preset overlay: red blocks, green clears blocking, orange inherits or depends on context, gray is unrecognized. Occupants and other overlays are excluded; battle rules and automatic placement are not implemented here.
+Left/right selects a backdrop, up/down selects scenery, and clicking places its anchor (yellow cross). `G` toggles the grid and snapping, `Space` pauses animation, `S` toggles shadows, and `Esc` exits. `H4_GRID=1` enables the grid on startup. `B` toggles battle-on-bridge context (`H4_BRIDGE=1` enables it on startup): code 0 blocks outside the deck on a bridge, and inherits the underlying field on land. Context is selected independently of the resource name. Rendering preserves layer coordinates and the stored animation offset. `H4_SCREENSHOT=out.png` captures a frame and exits. Grid colors show the preset overlay: red blocks, green clears blocking, orange inherits the underlying field, gray is unrecognized. Occupants and other overlays are excluded; battle rules and automatic placement are not implemented here.
 
 ### Animation viewer
 

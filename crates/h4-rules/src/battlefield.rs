@@ -20,15 +20,16 @@ pub struct CellSurface {
 }
 
 /// Apply one preset byte to an existing cell, preserving unrelated flags.
-/// `block_zero` is the context byte read by RVA 162aa0; its producer is still
-/// under investigation. Callers must supply it, rather than assume a mode.
+/// `on_bridge` is the bridge flag of the adventure position, copied into the
+/// combat context by RVA 40e5e0 and read by RVA 162aa0. It describes the place
+/// of the battle, not the preset resource name.
 /// Presets are overlays: zero and unrecognized values can leave a cell intact.
-pub fn apply_preset_cell(cell: &mut CellSurface, value: u8, block_zero: bool) {
+pub fn apply_preset_cell(cell: &mut CellSurface, value: u8, on_bridge: bool) {
     match value {
-        0 if block_zero => cell.flags |= 0x1c,
+        0 if on_bridge => cell.flags |= 0x1c,
         1 => {
             cell.terrain = 1;
-            cell.flags = (cell.flags & 0xe3) | if block_zero { 0 } else { 0x10 };
+            cell.flags = (cell.flags & 0xe3) | if on_bridge { 0 } else { 0x10 };
         }
         2 => {
             cell.terrain = 1;

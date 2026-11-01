@@ -167,10 +167,18 @@ Preset cell overlays have a separate focused fixture:
   --vectors /tmp/preset_cell_vectors.tsv
 ```
 
-It executes the native switch at RVA `162bc4..162c2b` and the real terrain
-setter, without patching instructions. All 256 codes, both supplied context
-modes, two initial terrain bytes and three initial flag bytes produce 3,072
-vectors. Compare the output with `crates/h4-rules/tests/preset_cell_vectors.tsv`.
+It executes the full native context constructor (`40e5e0`) with an adventure
+position, followed by full preset application (`162aa0`). Context getters,
+reference counting, geometry checks, row traversal and the terrain setter
+execute from the unmodified image. Only the supported platform allocator is
+substituted by the usual bounded arena. The fixture supplies a synthetic
+single-cell row, two army pointers set to null, and no town or garrison.
+The constructor copies the position's bridge flag into context +0x20;
+the initializer reads that actual context rather than a supplied switch input.
+All 256 codes, both bridge modes, two initial terrain bytes and three initial
+flag bytes produce 3,072 vectors. Stack and reference balances are checked.
+Compare the output with `crates/h4-rules/tests/preset_cell_vectors.tsv`.
 The normal Rust integration test checks these stored native answers in CI.
-This verifies one cell overlay; context derivation, geometry and row traversal
-are outside the fixture. See `decomp/battlefield.md` for the unresolved context.
+This verifies context-to-cell application, not the generation of the initial
+field or a real 102-row preset. See `decomp/battlefield.md` for the bridge flag's
+provenance and remaining limits.

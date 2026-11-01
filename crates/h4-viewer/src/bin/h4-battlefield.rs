@@ -6,17 +6,17 @@ use h4_formats::sprite::Rect;
 use h4_rules::battlefield::{apply_preset_cell, cell_is_blocked, CellSurface};
 use macroquad::prelude::*;
 
-// Show only context-independent changes on an initially clear cell.
-// Zero can inherit earlier overlays, so it never means unconditionally open.
-fn preset_status(value: u8) -> (&'static str, Color) {
-    if value == 0 {
-        return ("inherited / context-dependent", ORANGE);
+// Zero inherits earlier overlays on land, but blocks outside the bridge deck.
+// Scenery shown in this resource viewer is excluded from the cell query.
+fn preset_status(value: u8, on_bridge: bool) -> (&'static str, Color) {
+    if value == 0 && !on_bridge {
+        return ("inherited from underlying field", ORANGE);
     }
-    if !matches!(value, 1 | 2 | 255) {
+    if !matches!(value, 0 | 1 | 2 | 255) {
         return ("unrecognized overlay (unchanged)", GRAY);
     }
     let mut cell = CellSurface::default();
-    apply_preset_cell(&mut cell, value, false);
+    apply_preset_cell(&mut cell, value, on_bridge);
     if cell_is_blocked(cell.flags, &[], None) {
         ("blocked by preset", RED)
     } else {
@@ -126,6 +126,8 @@ async fn main() {
     let mut item = scenery(&res, &objects[object], shadow);
     let mut anchor = vec2(590., 512.);
     let mut grid = std::env::var_os("H4_GRID").is_some();
+    // This is a user-selected battle context, independent of resource names.
+    let mut on_bridge = std::env::var("H4_BRIDGE").is_ok_and(|v| v == "1");
     let mut selected = None;
     let mut map = res
         .read(&fields[field])
@@ -159,6 +161,9 @@ async fn main() {
         if is_key_pressed(KeyCode::Space) {
             paused = !paused;
         }
+        if is_key_pressed(KeyCode::B) {
+            on_bridge = !on_bridge;
+        }
         if is_key_pressed(KeyCode::G) {
             grid = !grid;
         }
@@ -178,9 +183,9 @@ async fn main() {
             elapsed += get_frame_time();
         }
         let scale = (screen_width() / 1180.)
-            .min((screen_height() - 135.) / 1024.)
+            .min((screen_height() - 160.) / 1024.)
             .max(0.01);
-        let origin = vec2((screen_width() - 1180. * scale) / 2., 135.);
+        let origin = vec2((screen_width() - 1180. * scale) / 2., 160.);
         if is_mouse_button_pressed(MouseButton::Left) {
             let mouse = mouse_position();
             let clicked = (vec2(mouse.0, mouse.1) - origin) / scale;
@@ -235,7 +240,7 @@ async fn main() {
                         let (cx, cy) = BattlefieldPreset::cell_center(x, y).unwrap();
                         let center = origin + vec2(cx as f32, cy as f32) * scale;
                         let corners = [vec2(-16., 0.), vec2(0., -8.), vec2(16., 0.), vec2(0., 8.)];
-                        let (_, color) = preset_status(map.cell(x, y).unwrap());
+                        let (_, color) = preset_status(map.cell(x, y).unwrap(), on_bridge);
                         for i in 0..4 {
                             let a = center + corners[i] * scale;
                             let b = center + corners[(i + 1) % 4] * scale;
@@ -277,7 +282,8 @@ async fn main() {
             fields[field].clone(),
             objects[object].clone(),
             item.as_ref().map(|s| s.details.clone()).unwrap_or_else(|e| e.clone()),
-            "Left/Right field | Up/Down object | G grid: red blocked, green clear, orange inherited | Space pause | S shadow".into(),
+            "Left/Right field | Up/Down object | G grid | B bridge mode | Space pause | S shadow | Esc exit".into(),
+            format!("Battle on bridge: {} | red blocked, green clear, orange inherited | scenery blocking excluded", if on_bridge { "yes" } else { "no" }),
         ]
         .iter()
         .enumerate()
@@ -285,15 +291,18 @@ async fn main() {
             draw_text(text, 10., 22. + i as f32 * 24., 19., WHITE);
         }
         let status = selected.and_then(|(x, y)| {
-            map.as_ref()
-                .and_then(|m| m.cell(x, y))
-                .map(|v| format!("Cell ({x}, {y}): code {v}; {}", preset_status(v).0))
+            map.as_ref().and_then(|m| m.cell(x, y)).map(|v| {
+                format!(
+                    "Cell ({x}, {y}): code {v}; {}",
+                    preset_status(v, on_bridge).0
+                )
+            })
         });
         if let Some(status) = status {
-            draw_text(&status, 10., 118., 18., YELLOW);
+            draw_text(&status, 10., 142., 18., YELLOW);
         }
         if let Err(e) = &background {
-            draw_text(e, 10., 135., 20., RED);
+            draw_text(e, 10., 160., 20., RED);
         }
         ticks += 1;
         if ticks == 3 {
