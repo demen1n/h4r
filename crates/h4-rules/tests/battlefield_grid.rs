@@ -72,14 +72,16 @@ fn blocking_matches_native_virtual_queries_and_compound_overrides() {
             .map(|v| v.parse().unwrap())
             .collect();
         let model = h4_formats::combat_object::CombatObject {
-            version: 2,
-            properties: [1, 1],
-            parameter: 0,
-            frames_per_second: 10,
-            flag: v[1] as u8,
-            attributes: [v[0] as u8, 0, 0, 0, 0],
-            type_id: 0x25,
-            type_name: String::new(),
+            header: h4_formats::combat_object::CombatObjectHeader {
+                version: 2,
+                properties: [1, 1],
+                parameter: 0,
+                frames_per_second: 10,
+                flag: v[1] as u8,
+                attributes: [v[0] as u8, 0, 0, 0, 0],
+                type_id: 0x25,
+                type_name: String::new(),
+            },
             image: h4_formats::sprite::ActorSequence {
                 frames: Vec::new(),
                 shadows: Vec::new(),

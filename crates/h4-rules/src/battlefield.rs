@@ -7,13 +7,14 @@
 use h4_formats::battlefield::BattlefieldPreset;
 use h4_formats::combat_object::{CombatObject, CombatObjectSegment};
 
-// Bits of the live cell's flag byte (+1). Only "blocked" is understood;
-// the other two are named by value until their meaning is found in the exe.
+// Bits of the live cell's flag byte (+1). 0x08 is still unexplained; 0x10 is
+// named by value because only one of its readers (the obstacle placer) is known.
 /// The cell itself cannot be entered (checked by RVA 183a10).
 pub const FLAG_BLOCKED: u8 = 0x04;
 /// Meaning unknown; set by preset codes 0 (on a bridge) and 255.
 pub const FLAG_08: u8 = 0x08;
-/// Meaning unknown; set by preset code 1 off a bridge and by code 0 on one.
+/// Obstacles may be placed on the cell: the placer rejects cells without it
+/// (RVA 209900). Set by preset code 1 off a bridge and by code 0 on one.
 pub const FLAG_10: u8 = 0x10;
 /// The three bits preset codes 0/1/2 overwrite.
 const PRESET_BITS: u8 = FLAG_BLOCKED | FLAG_08 | FLAG_10;
@@ -148,7 +149,7 @@ impl PlacedObstacle {
         at: (i32, i32),
         id: u32,
     ) -> Result<Self, &'static str> {
-        let [width, height] = model.properties;
+        let [width, height] = model.header.properties;
         if width == 0 || width != height || model.segment_size() != width {
             return Err("scenery requires a resolved compound segment layout");
         }
@@ -191,6 +192,52 @@ pub struct BattlefieldGrid {
 }
 
 impl BattlefieldGrid {
+    /// The standard 102-row field with every cell set to `underlying`
+    /// (no preset). The game builds this from the terrain around the battle;
+    /// that generator is not ported yet, so the caller supplies the surface.
+    pub fn standard(underlying: CellSurface) -> Self {
+        let rows = h4_formats::battlefield::row_bounds()
+            .map(|(start, end)| GridRow {
+                start,
+                cells: vec![
+                    BattlefieldCell {
+                        surface: underlying,
+                        occupants: Vec::new(),
+                    };
+                    end - start
+                ],
+            })
+            .collect();
+        Self { rows }
+    }
+
+    /// Number of stored rows (valid `x` are `0..row_count()`).
+    pub fn row_count(&self) -> usize {
+        self.rows.len()
+    }
+
+    /// Half-open range of valid `y` in row `x`.
+    pub fn row_bounds(&self, x: i32) -> Option<(i32, i32)> {
+        let row = self.rows.get(usize::try_from(x).ok()?)?;
+        Some((row.start as i32, (row.start + row.cells.len()) as i32))
+    }
+
+    /// Port of RVA 162cb0, run after the presets and before obstacles: block
+    /// the first and last cell of every row, and every cell with x + y < 55
+    /// (the top corner of the diamond, far behind the backdrop's horizon).
+    pub fn block_edges(&mut self) {
+        for (x, row) in self.rows.iter_mut().enumerate() {
+            let start = row.start;
+            let count = row.cells.len();
+            for (i, cell) in row.cells.iter_mut().enumerate() {
+                let y = start + i;
+                if i == 0 || i + 1 == count || x + y < 55 {
+                    cell.surface.flags |= FLAG_BLOCKED;
+                }
+            }
+        }
+    }
+
     /// Field with the preset's geometry: every cell starts as `underlying`,
     /// then the preset is laid over it.
     pub fn from_preset(
@@ -241,6 +288,13 @@ impl BattlefieldGrid {
         let row = self.rows.get(usize::try_from(x).ok()?)?;
         row.cells
             .get(usize::try_from(y).ok()?.checked_sub(row.start)?)
+    }
+
+    /// Change the terrain and flags of one cell (for building fields in code).
+    pub fn surface_mut(&mut self, x: i32, y: i32) -> Option<&mut CellSurface> {
+        let row = self.rows.get_mut(usize::try_from(x).ok()?)?;
+        let index = usize::try_from(y).ok()?.checked_sub(row.start)?;
+        Some(&mut row.cells.get_mut(index)?.surface)
     }
 
     /// Outside the stored field cannot be entered.

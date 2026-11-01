@@ -222,3 +222,23 @@ index/alpha coverage hashes. Only the existing allocator/platform hooks are used
 segmentation and image operations execute in the original code. Synthetic images
 and returned values can be checked into the repository. No game resources are
 stored in the vectors. See `decomp/combat_object.md` for remaining boundaries.
+
+### Obstacle placement
+
+```sh
+.venv/bin/python tools/testbench/obstacle_placer.py --exe bin/heroes4.exe \
+  --vectors crates/h4-rules/tests/obstacle_placer_vectors.tsv
+cargo test -p h4-rules --test obstacle_placer_vectors --locked
+# the same against the installed headers and weights table (not stored):
+.venv/bin/python tools/testbench/obstacle_placer.py --exe bin/heroes4.exe --inputs installed
+```
+
+Runs the original weights-table parser (2089a0) and the whole placer (208ec0,
+20a270: start areas, paths, breadth-first walk, weights, choice, bookkeeping) on
+fields built by the original geometry, cell and edge code (34db60, 183560,
+162cb0), with the original combat RNG. Replaced: the header-table and table
+caches (given data), model loading (size and type), object creation (position
+recorded), image scale, profiler, `atexit`, critical sections. The final
+obstruction pass is skipped (not ported). Inputs come from
+`crates/h4-rules/examples/support/obstacle_case.rs` (synthetic) or the game.
+About two minutes for 24 scenarios. See `decomp/obstacle_placement.md`.
