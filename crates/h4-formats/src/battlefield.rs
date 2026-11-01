@@ -7,7 +7,7 @@ use crate::Result;
 #[derive(Debug, Clone)]
 pub struct BattlefieldRow {
     pub start: usize,
-    /// Raw map values; their meaning is not yet established.
+    /// Preset overlay codes (0, 1, 2, 255); see decomp/battlefield.md.
     pub cells: Vec<u8>,
 }
 
@@ -20,7 +20,9 @@ pub struct BattlefieldPreset {
 impl BattlefieldPreset {
     /// Cell center in the preset's 1180x1024 coordinate system (RVA 34db00).
     pub fn cell_center(x: usize, y: usize) -> Option<(i32, i32)> {
-        if x >= 102 || y >= 102 { return None; }
+        if x >= 102 || y >= 102 {
+            return None;
+        }
         let (x, y) = (x as i32, y as i32);
         Some((590 + (y - x) * 16, 512 + (x + y - 102) * 8))
     }
