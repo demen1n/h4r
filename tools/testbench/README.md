@@ -182,3 +182,26 @@ The normal Rust integration test checks these stored native answers in CI.
 This verifies context-to-cell application, not the generation of the initial
 field or a real 102-row preset. See `decomp/battlefield.md` for the bridge flag's
 provenance and remaining limits.
+
+Stationary obstacles and cell centers:
+
+```sh
+.venv/bin/python -I tools/testbench/obstacle_cells.py --exe bin/heroes4.exe \
+  --footprints /tmp/footprint_vectors.tsv \
+  --blocking /tmp/obstacle_blocking_vectors.tsv \
+  --centers /tmp/battlefield_center_vectors.tsv
+```
+
+The fixture runs the real footprint constructor (`1fc340`, 18 sizes), root
+copy constructor (`239200`), stationary-object virtual accessors (`477620`,
+`477660`) and cell blocking query (`183a10`, 432 cases). It uses original
+vtable pointers, explicit segment/compound inputs and linked-list fixtures;
+none of these accessors are stubs. Dynamic compound changes, image-dependent
+segmentation and automatic placement are outside this fixture.
+
+It also executes the native projection (`164b40`) for all 4,838 stored cell
+centers with a full-size 1180x1024 identity viewport. This caught an 8-pixel
+vertical error: projecting integer map coordinates gives a cell vertex;
+the actual center has subcell coordinates `(16*x+8,16*y+8)`.
+All three output files are retained under `crates/h4-rules/tests/` and checked
+by `battlefield_grid.rs` without the exe in CI.
