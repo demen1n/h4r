@@ -205,3 +205,20 @@ vertical error: projecting integer map coordinates gives a cell vertex;
 the actual center has subcell coordinates `(16*x+8,16*y+8)`.
 All three output files are retained under `crates/h4-rules/tests/` and checked
 by `battlefield_grid.rs` without the exe in CI.
+
+
+### Compound obstacle images
+
+```sh
+.venv/bin/python tools/testbench/obstacle_segments.py --exe bin/heroes4.exe \
+  --output crates/h4-formats/tests/fixtures/obstacle_segments.txt
+cargo test -p h4-formats --test obstacle_segments --locked
+```
+
+Runs the full native RVA 238690 at scale 1.0 on 200 synthetic one/two-layer
+fixtures, including real bitmap conversion and scanline cropping. Records segment
+order, size, cell position, animation offset, layer rectangles and normalized
+index/alpha coverage hashes. Only the existing allocator/platform hooks are used;
+segmentation and image operations execute in the original code. Synthetic images
+and returned values can be checked into the repository. No game resources are
+stored in the vectors. See `decomp/combat_object.md` for remaining boundaries.
