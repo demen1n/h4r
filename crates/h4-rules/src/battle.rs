@@ -17,6 +17,7 @@
 //!   the target needs spell rules we don't have yet, so `HitOptions::ability_42` stays `None`;
 //! - the winner's heroes each get the experience of every enemy creature killed.
 
+pub mod deployment;
 pub mod state;
 pub use state::BattleState;
 

@@ -1,9 +1,9 @@
 //! An owned, serializable battle, independent of the adventure map and renderer.
 //!
 //! This is the foundation for #53, not a new combat resolver. The caller supplies
-//! the field, deployment (#57) and turn order (#60); no original placement or
-//! initiative rule is guessed here. The old `battle::fight` remains the map's
-//! stand-in until #75. Heroes retain their identity, with combat stats left for #71.
+//! the field and turn order (#60); `deploy_initial` supplies the recovered
+//! open-field deployment (#57). No initiative rule is guessed here.
+//! The old `battle::fight` remains the map's stand-in until #75. Heroes retain their identity, with combat stats left for #71.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -32,8 +32,8 @@ pub struct BattleArmy {
     pub slots: [Option<UnitId>; SLOTS],
 }
 
-/// Explicit top-left cell and square size. Sizes 1 and 2 are supported here;
-/// choosing a creature's size and initial position is the caller's job (#57).
+/// Top-left collision cell and native rounded-footprint diameter.
+/// Real combat models use sizes 3..7; explicit fixtures may use any nonzero size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UnitPosition {
     pub at: (i32, i32),
@@ -150,8 +150,8 @@ fn occupied_ids(field: &BattlefieldGrid) -> BTreeSet<u32> {
 }
 
 fn unit_obstacle(id: UnitId, position: UnitPosition) -> Result<PlacedObstacle, String> {
-    if !matches!(position.size, 1 | 2) {
-        return Err("battle units need an explicit size of 1 or 2".into());
+    if position.size == 0 {
+        return Err("battle units need a nonzero model footprint size".into());
     }
     Ok(PlacedObstacle {
         at: position.at,
@@ -295,6 +295,29 @@ impl BattleState {
     }
     pub fn events(&self) -> &[CombatEvent] {
         &self.data.events
+    }
+
+    pub(crate) fn clear_deployment(&mut self) -> Result<(), String> {
+        if self.data.turns.round != 0 {
+            return Err("deployment is closed after round one starts".into());
+        }
+        for unit in &mut self.data.units {
+            self.data.field.remove_object(unit.id.0);
+            unit.position = None;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn can_deploy(&self, id: UnitId, position: UnitPosition) -> bool {
+        let Ok(obstacle) = unit_obstacle(id, position) else {
+            return false;
+        };
+        obstacle.footprint.cells().all(|(dx, dy)| {
+            match (position.at.0.checked_add(dx), position.at.1.checked_add(dy)) {
+                (Some(x), Some(y)) => !self.data.field.is_blocked(x, y, Some(id.0)),
+                _ => false,
+            }
+        })
     }
 
     /// Deployment can be revised before round one. Rejected placements leave
@@ -618,7 +641,7 @@ impl BattleState {
         for event in &data.events {
             let valid = match event {
                 CombatEvent::Deployed { unit, position } => {
-                    ids.contains(unit) && matches!(position.size, 1 | 2)
+                    ids.contains(unit) && position.size != 0
                 }
                 CombatEvent::TurnStarted { unit } | CombatEvent::TurnFinished { unit } => {
                     ids.contains(unit)

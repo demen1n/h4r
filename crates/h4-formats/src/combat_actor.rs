@@ -31,7 +31,8 @@ impl CombatAction {
 #[derive(Debug, Clone)]
 pub struct CombatActorModel {
     pub version: u16,
-    /// Two model properties; their physical meaning still needs confirmation.
+    /// Collision-footprint diameter in battlefield cells, then a second model property.
+    /// Native model offsets +0x18/+0x1c (reader RVA 1deb50).
     pub properties: [u8; 2],
     pub prewalk_length: u16,
     pub walk_length: u16,
@@ -44,6 +45,11 @@ pub struct CombatActorModel {
 }
 
 impl CombatActorModel {
+    /// Native collision diameter, read by actor getter RVA 1d5120.
+    pub fn footprint_size(&self) -> u8 {
+        self.properties[0]
+    }
+
     pub fn read(data: &[u8]) -> Result<Self> {
         let mut r = Reader::new(data);
         let version = r.u16()?;
