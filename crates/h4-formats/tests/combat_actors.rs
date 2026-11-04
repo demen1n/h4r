@@ -41,6 +41,7 @@ fn versions_and_explicit_direction_mapping() {
     for version in [5, 6] {
         let model = CombatActorModel::read(&definition(version)).unwrap();
         assert_eq!(model.version, version);
+        assert_eq!(model.footprint_size(), 6);
         assert_eq!(model.offset, (10, -4));
         assert_eq!(model.action("melee").unwrap().frames_per_second, 9);
         assert_eq!(model.action("melee").unwrap().parameter, 4);
@@ -91,6 +92,15 @@ fn installed_combat_models_and_sequences() {
             }
         };
         versions[model.version as usize] += 1;
+        let expected_size = match name.to_lowercase().as_str() {
+            "combat_actor.black dragon.h4d" => Some(7),
+            "combat_actor.behemoth.h4d" => Some(6),
+            "combat_actor.mage.h4d" => Some(4),
+            _ => None,
+        };
+        if let Some(size) = expected_size {
+            assert_eq!(model.footprint_size(), size, "{name}");
+        }
         for action in &model.actions {
             if action.is_composite() {
                 continue;

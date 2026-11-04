@@ -242,3 +242,18 @@ recorded), image scale, profiler, `atexit`, critical sections. The final
 obstruction pass is skipped (not ported). Inputs come from
 `crates/h4-rules/examples/support/obstacle_case.rs` (synthetic) or the game.
 About two minutes for 24 scenarios. See `decomp/obstacle_placement.md`.
+
+Open-field army deployment (#57): `deployment.py --exe bin/heroes4.exe --out PATH`
+records 156 fixtures from initializer `224270`, coordinate block `22dbb6..22dc07`
+native compaction dispatch `22dfbc..22e0cb` and pull helper `22e3b0`. Collision masks execute `1fc340`; occupancy, model sizes,
+height and move bookkeeping are fixture inputs. The full creature constructor,
+AI rearrangement, siege/tower and bridge contexts are outside this fixture.
+See `decomp/deployment.md` and `cargo test -p h4-rules --test deployment`.
+
+Native initiative, wait and defense (#60):
+`initiative.py --exe bin/heroes4.exe --out PATH` records 1,619 fixtures from native
+selection/comparison, morale classification/RNG and stance arithmetic. Includes
+12 connected three-round action traces executing native round reset, selection,
+wait/defend flags, stance expiry and last-side updates. Virtual stats, abilities
+and effects are fixture inputs; UI and the full action pipeline are excluded.
+See `decomp/initiative.md` and `cargo test -p h4-rules --test initiative`.

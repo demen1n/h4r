@@ -1,9 +1,9 @@
 //! An owned, serializable battle, independent of the adventure map and renderer.
 //!
 //! This is the foundation for #53, not a new combat resolver. The caller supplies
-//! the field, deployment (#57) and turn order (#60); no original placement or
-//! initiative rule is guessed here. The old `battle::fight` remains the map's
-//! stand-in until #75. Heroes retain their identity, with combat stats left for #71.
+//! the field and effective combat stats; `deploy_initial` supplies recovered
+//! deployment (#57), `begin_initiative_round` schedules turns/wait/defense (#60).
+//! The old `battle::fight` remains the map's stand-in until #75. Heroes retain their identity, with combat stats left for #71.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -11,13 +11,16 @@ use h4_state::army::{ArmyId, Hero, MapArmy, Slot, SLOTS};
 use h4_state::Color;
 use serde::{Deserialize, Serialize};
 
+use super::initiative::{
+    defending_defense, morale_result, InitiativeStats, RoundInitiative, UnitInitiative,
+};
 use super::Side;
 use crate::battlefield::{BattlefieldGrid, CellOccupant, CombatFootprint, PlacedObstacle};
 use crate::creatures::CreatureStats;
 use crate::random::CombatRandom;
 
 /// Version of our JSON fixture, not the original game's saved-battle format.
-pub const SNAPSHOT_VERSION: u32 = 1;
+pub const SNAPSHOT_VERSION: u32 = 2;
 
 /// Stable within one battle. Also the occupant ID in the collision grid and the
 /// ID passed to combat dice. IDs are never vector indices or adventure army IDs.
@@ -32,8 +35,8 @@ pub struct BattleArmy {
     pub slots: [Option<UnitId>; SLOTS],
 }
 
-/// Explicit top-left cell and square size. Sizes 1 and 2 are supported here;
-/// choosing a creature's size and initial position is the caller's job (#57).
+/// Top-left collision cell and native rounded-footprint diameter.
+/// Real combat models use sizes 3..7; explicit fixtures may use any nonzero size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UnitPosition {
     pub at: (i32, i32),
@@ -75,14 +78,15 @@ impl BattleUnit {
     }
 }
 
-/// Storage and bookkeeping only: the caller supplies the order, not a speed
-/// sort masquerading as the original initiative rules. Waiting/defense are #60.
+/// Turn bookkeeping for either native initiative or an explicit fixture order.
+/// In native mode `pending` is eligibility storage, not a precomputed sort.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct TurnQueue {
     pub round: u32,
     pub active: Option<UnitId>,
     pub pending: VecDeque<UnitId>,
     pub completed: Vec<UnitId>,
+    pub initiative: Option<RoundInitiative>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -103,6 +107,19 @@ pub enum CombatEvent {
     },
     TurnFinished {
         unit: UnitId,
+    },
+    InitiativeStarted {
+        state: RoundInitiative,
+    },
+    Waited {
+        unit: UnitId,
+    },
+    Defended {
+        unit: UnitId,
+    },
+    TurnSpeedChanged {
+        unit: UnitId,
+        speed: i32,
     },
     Rolled {
         first: u32,
@@ -150,8 +167,8 @@ fn occupied_ids(field: &BattlefieldGrid) -> BTreeSet<u32> {
 }
 
 fn unit_obstacle(id: UnitId, position: UnitPosition) -> Result<PlacedObstacle, String> {
-    if !matches!(position.size, 1 | 2) {
-        return Err("battle units need an explicit size of 1 or 2".into());
+    if position.size == 0 {
+        return Err("battle units need a nonzero model footprint size".into());
     }
     Ok(PlacedObstacle {
         at: position.at,
@@ -297,6 +314,29 @@ impl BattleState {
         &self.data.events
     }
 
+    pub(crate) fn clear_deployment(&mut self) -> Result<(), String> {
+        if self.data.turns.round != 0 {
+            return Err("deployment is closed after round one starts".into());
+        }
+        for unit in &mut self.data.units {
+            self.data.field.remove_object(unit.id.0);
+            unit.position = None;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn can_deploy(&self, id: UnitId, position: UnitPosition) -> bool {
+        let Ok(obstacle) = unit_obstacle(id, position) else {
+            return false;
+        };
+        obstacle.footprint.cells().all(|(dx, dy)| {
+            match (position.at.0.checked_add(dx), position.at.1.checked_add(dy)) {
+                (Some(x), Some(y)) => !self.data.field.is_blocked(x, y, Some(id.0)),
+                _ => false,
+            }
+        })
+    }
+
     /// Deployment can be revised before round one. Rejected placements leave
     /// both the old occupancy and the log untouched.
     pub fn deploy(&mut self, id: UnitId, position: UnitPosition) -> Result<(), String> {
@@ -356,11 +396,147 @@ impl BattleState {
             active: None,
             pending: order.iter().copied().collect(),
             completed: Vec::new(),
+            initiative: None,
         };
         self.data.events.push(CombatEvent::RoundStarted {
             round,
             order: order.to_vec(),
         });
+        Ok(())
+    }
+
+    /// Begin a native scheduled round. Provide resolved speed/morale for every
+    /// participant, including heroes: hero combat stats are not guessed here.
+    /// Morale consumes one (0, unit ID, 0x1c) combat roll per participant in
+    /// battlefield order, including dead entries, as native round reset does.
+    pub fn begin_initiative_round(
+        &mut self,
+        stats: &[(UnitId, InitiativeStats)],
+    ) -> Result<(), String> {
+        let ids: BTreeSet<_> = self.data.units.iter().map(|u| u.id).collect();
+        let supplied: BTreeSet<_> = stats.iter().map(|(id, _)| *id).collect();
+        if stats.len() != ids.len() || supplied != ids {
+            return Err("provide exactly one initiative input for every unit".into());
+        }
+        for (_, stat) in stats {
+            morale_result(stat.morale, 0)?;
+        }
+        let previous = self.data.turns.initiative.clone();
+        let mut trial = self.clone();
+        let order: Vec<_> = trial
+            .units()
+            .iter()
+            .filter(|u| u.alive())
+            .map(|u| u.id)
+            .collect();
+        trial.begin_round(&order)?;
+        let mut initiative = RoundInitiative {
+            last_side: previous
+                .as_ref()
+                .map_or(Side::Defender, |old| old.last_side),
+            entries: Vec::new(),
+        };
+        for unit in &self.data.units {
+            let stat = stats
+                .iter()
+                .find(|(id, _)| *id == unit.id)
+                .expect("IDs validated above")
+                .1;
+            let roll = (trial.roll(0, unit.id.0, 0x1c) % 10) as u8;
+            initiative.entries.push(UnitInitiative {
+                unit: unit.id,
+                side: unit.side,
+                stats: stat,
+                morale_roll: roll,
+                waiting: false,
+                defending: previous
+                    .as_ref()
+                    .and_then(|old| old.entries.iter().find(|e| e.unit == unit.id))
+                    .is_some_and(|e| e.defending),
+            });
+        }
+        trial.data.events.push(CombatEvent::InitiativeStarted {
+            state: initiative.clone(),
+        });
+        trial.data.turns.initiative = Some(initiative);
+        *self = trial;
+        Ok(())
+    }
+
+    /// Wait once in this round. Waiting does not finish the unit's action.
+    pub fn wait(&mut self) -> Result<UnitId, String> {
+        let id = self.data.turns.active.ok_or("there is no active turn")?;
+        let initiative = self
+            .data
+            .turns
+            .initiative
+            .as_mut()
+            .ok_or("waiting needs a native initiative round")?;
+        let entry = initiative.entry_mut(id)?;
+        if entry.waiting {
+            return Err("this unit has already waited this round".into());
+        }
+        entry.waiting = true;
+        self.data.turns.active = None;
+        self.data.turns.pending.push_back(id);
+        self.data.events.push(CombatEvent::Waited { unit: id });
+        Ok(id)
+    }
+
+    /// End the action in a defensive stance. The stance lasts across round
+    /// boundaries until this participant is next selected (native 167e2f).
+    pub fn defend(&mut self) -> Result<UnitId, String> {
+        let id = self.data.turns.active.ok_or("there is no active turn")?;
+        let initiative = self
+            .data
+            .turns
+            .initiative
+            .as_mut()
+            .ok_or("defense needs a native initiative round")?;
+        initiative.entry_mut(id)?.defending = true;
+        self.data.events.push(CombatEvent::Defended { unit: id });
+        self.finish_turn()
+    }
+
+    pub fn is_defending(&self, id: UnitId) -> bool {
+        self.data.turns.initiative.as_ref().is_some_and(|round| {
+            round
+                .entries
+                .iter()
+                .any(|entry| entry.unit == id && entry.defending)
+        })
+    }
+
+    /// Apply only the native defensive-stance component. The complete damage
+    /// command and other spell/artifact modifiers are separate rules (#68).
+    pub fn apply_defense_stance(
+        &self,
+        id: UnitId,
+        defense: f32,
+        effect_1f: bool,
+    ) -> Result<f32, String> {
+        self.unit(id).ok_or("unknown battle unit")?;
+        Ok(if self.is_defending(id) {
+            defending_defense(defense, effect_1f)
+        } else {
+            defense
+        })
+    }
+
+    /// Spell/effect rules can refresh effective speed without rebuilding the
+    /// round or drawing fresh morale dice. Next selection scans the new values.
+    pub fn set_turn_speed(&mut self, id: UnitId, speed: i32) -> Result<(), String> {
+        self.data
+            .turns
+            .initiative
+            .as_mut()
+            .ok_or("no native initiative round")?
+            .entry_mut(id)?
+            .stats
+            .speed = speed;
+        self.data
+            .events
+            .push(CombatEvent::TurnSpeedChanged { unit: id, speed });
         Ok(())
     }
 
@@ -370,12 +546,32 @@ impl BattleState {
         if self.data.turns.active.is_some() {
             return Err("finish the active turn first".into());
         }
-        while let Some(unit) = self.data.turns.pending.pop_front() {
-            if self.unit(unit).is_some_and(BattleUnit::alive) {
-                self.data.turns.active = Some(unit);
-                self.data.events.push(CombatEvent::TurnStarted { unit });
-                return Ok(Some(unit));
+        // Dead entries are removed before selection; waiting entries remain
+        // eligible, but their negative priorities put them after ordinary ones.
+        let alive: BTreeSet<_> = self
+            .data
+            .units
+            .iter()
+            .filter(|u| u.alive())
+            .map(|u| u.id)
+            .collect();
+        self.data.turns.pending.retain(|id| alive.contains(id));
+        let unit = if let Some(initiative) = &self.data.turns.initiative {
+            initiative.next(|id| self.data.turns.pending.contains(&id))
+        } else {
+            self.data.turns.pending.front().copied()
+        };
+        if let Some(unit) = unit {
+            self.data.turns.pending.retain(|id| *id != unit);
+            if let Some(initiative) = self.data.turns.initiative.as_mut() {
+                let entry = initiative.entry_mut(unit)?;
+                let side = entry.side;
+                entry.defending = false;
+                initiative.last_side = side;
             }
+            self.data.turns.active = Some(unit);
+            self.data.events.push(CombatEvent::TurnStarted { unit });
+            return Ok(Some(unit));
         }
         Ok(None)
     }
@@ -581,6 +777,19 @@ impl BattleState {
         {
             return Err("invalid battle turn queue".into());
         }
+        if let Some(initiative) = &turns.initiative {
+            let native_ids: BTreeSet<_> = initiative.entries.iter().map(|e| e.unit).collect();
+            if turns.round == 0 || native_ids != ids || native_ids.len() != initiative.entries.len()
+            {
+                return Err("invalid initiative participants".into());
+            }
+            for entry in &initiative.entries {
+                morale_result(entry.stats.morale, entry.morale_roll)?;
+                if self.unit(entry.unit).is_none_or(|u| u.side != entry.side) {
+                    return Err("initiative side does not match participant".into());
+                }
+            }
+        }
         if data.events.first() != Some(&CombatEvent::Created { seed: random.seed }) {
             return Err("battle log must begin with its creation seed".into());
         }
@@ -609,6 +818,98 @@ impl BattleState {
                 _ => {}
             }
         }
+        let mut native: Option<RoundInitiative> = None;
+        let mut native_round = false;
+        let mut rolls = BTreeMap::new();
+        for event in &data.events {
+            match event {
+                CombatEvent::RoundStarted { .. } => {
+                    if !native_round {
+                        native = None;
+                    }
+                    native_round = false;
+                    rolls.clear();
+                }
+                CombatEvent::Rolled {
+                    first: 0,
+                    second,
+                    purpose: 0x1c,
+                    value,
+                } => {
+                    rolls.insert(UnitId(*second), (*value % 10) as u8);
+                }
+                CombatEvent::InitiativeStarted { state } => {
+                    let expected_side = native.as_ref().map_or(Side::Defender, |old| old.last_side);
+                    if native_round
+                        || state.last_side != expected_side
+                        || state.entries.len() != data.units.len()
+                    {
+                        return Err("invalid initiative start event".into());
+                    }
+                    for (entry, unit) in state.entries.iter().zip(&data.units) {
+                        let defending = native
+                            .as_ref()
+                            .and_then(|old| old.entries.iter().find(|e| e.unit == entry.unit))
+                            .is_some_and(|e| e.defending);
+                        if entry.unit != unit.id
+                            || entry.side != unit.side
+                            || entry.waiting
+                            || entry.defending != defending
+                            || rolls.get(&entry.unit) != Some(&entry.morale_roll)
+                        {
+                            return Err("initiative inputs do not match the round log".into());
+                        }
+                        morale_result(entry.stats.morale, entry.morale_roll)?;
+                    }
+                    native = Some(state.clone());
+                    native_round = true;
+                }
+                CombatEvent::TurnStarted { unit } if native_round => {
+                    let round = native.as_mut().expect("native round event exists");
+                    let entry = round.entry_mut(*unit)?;
+                    entry.defending = false;
+                    let side = entry.side;
+                    round.last_side = side;
+                }
+                CombatEvent::Waited { unit } if native_round => {
+                    let entry = native
+                        .as_mut()
+                        .expect("native round event exists")
+                        .entry_mut(*unit)?;
+                    if entry.waiting {
+                        return Err("unit waited twice in round log".into());
+                    }
+                    entry.waiting = true;
+                }
+                CombatEvent::Defended { unit } if native_round => {
+                    native
+                        .as_mut()
+                        .expect("native round event exists")
+                        .entry_mut(*unit)?
+                        .defending = true;
+                }
+                CombatEvent::TurnSpeedChanged { unit, speed } if native_round => {
+                    native
+                        .as_mut()
+                        .expect("native round event exists")
+                        .entry_mut(*unit)?
+                        .stats
+                        .speed = *speed;
+                }
+                CombatEvent::Waited { .. }
+                | CombatEvent::Defended { .. }
+                | CombatEvent::TurnSpeedChanged { .. } => {
+                    return Err("native action outside initiative round".into())
+                }
+                _ => {}
+            }
+        }
+        if !native_round {
+            native = None;
+        }
+        if native != turns.initiative {
+            return Err("initiative state does not match its action log".into());
+        }
         if rounds != turns.round {
             return Err("battle log does not match the round counter".into());
         }
@@ -618,12 +919,17 @@ impl BattleState {
         for event in &data.events {
             let valid = match event {
                 CombatEvent::Deployed { unit, position } => {
-                    ids.contains(unit) && matches!(position.size, 1 | 2)
+                    ids.contains(unit) && position.size != 0
                 }
-                CombatEvent::TurnStarted { unit } | CombatEvent::TurnFinished { unit } => {
-                    ids.contains(unit)
-                }
+                CombatEvent::TurnStarted { unit }
+                | CombatEvent::TurnFinished { unit }
+                | CombatEvent::Waited { unit }
+                | CombatEvent::Defended { unit }
+                | CombatEvent::TurnSpeedChanged { unit, .. } => ids.contains(unit),
                 CombatEvent::RoundStarted { order, .. } => order.iter().all(|id| ids.contains(id)),
+                CombatEvent::InitiativeStarted { state } => {
+                    state.entries.iter().all(|entry| ids.contains(&entry.unit))
+                }
                 CombatEvent::Rolled { .. } => true,
                 CombatEvent::Created { seed } => *seed == random.seed,
             };

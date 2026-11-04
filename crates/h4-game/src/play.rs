@@ -75,8 +75,39 @@ impl Play {
         looks: &ArmyLooks,
     ) -> Play {
         turns::begin_game(&mut state, &creatures);
+        let mut play = Play {
+            state,
+            creatures,
+            rng,
+            level,
+            figures: BTreeMap::new(),
+            selected: None,
+            pending_attack: None,
+            message: String::new(),
+        };
+        play.rebuild_figures(actors, looks);
+        if !play.is_human_turn() {
+            play.end_turn();
+        }
+        play.select_next();
+        play
+    }
+
+    /// Change only the view: never reset movement, turns or the random generator.
+    /// Walking and deferred battles must finish before their figures can be replaced.
+    pub fn show_level(&mut self, level: u8, actors: &Actors, looks: &ArmyLooks) {
+        if self.busy() {
+            return;
+        }
+        self.level = level;
+        self.rebuild_figures(actors, looks);
+        self.selected = None;
+        self.select_next();
+    }
+
+    fn rebuild_figures(&mut self, actors: &Actors, looks: &ArmyLooks) {
         let mut figures = BTreeMap::new();
-        for a in state.armies.iter().filter(|a| a.at.level == level) {
+        for a in self.state.armies.iter().filter(|a| a.at.level == self.level) {
             let name = looks.actor(&a.army);
             let Some(actor) = name.as_deref().and_then(|n| actors.get(n)) else {
                 eprintln!("army at ({}, {}): no model for {}", a.at.col, a.at.row, describe(&a.army));
@@ -86,21 +117,7 @@ impl Play {
             let facing = if a.owner.is_some() { "e" } else { "sw" };
             figures.insert(a.id, Mover::new(actor, view_pos(a.at), facing));
         }
-        let mut play = Play {
-            state,
-            creatures,
-            rng,
-            level,
-            figures,
-            selected: None,
-            pending_attack: None,
-            message: String::new(),
-        };
-        if !play.is_human_turn() {
-            play.end_turn();
-        }
-        play.select_next();
-        play
+        self.figures = figures;
     }
 
     fn is_human_turn(&self) -> bool {
