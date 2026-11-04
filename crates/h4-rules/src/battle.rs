@@ -18,6 +18,7 @@
 //! - the winner's heroes each get the experience of every enemy creature killed.
 
 pub mod deployment;
+pub mod initiative;
 pub mod state;
 pub use state::BattleState;
 
