@@ -136,6 +136,7 @@ The prototype can add a test army if the current player has none on the displaye
 | Right drag; arrows / WASD | Pan the map |
 | Mouse wheel; `-` / `=` | Zoom |
 | `Tab` | Select the next army |
+| `U` | Switch surface / underground (after movement finishes) |
 | `Space` | Center on the selected army |
 | `Enter` | End the turn |
 
@@ -151,7 +152,7 @@ Optional environment variables:
 | `H4_FOOTPRINTS=1` | Outline object footprints |
 | `H4_OVERVIEW=1` | Start with an overview of the map |
 | `H4_SCREENSHOT=out.png` | Capture a rendered frame and exit; requires a graphics environment |
-| `H4_ORDERS="10,30;end;tab"` | Execute scripted movement and turn commands; useful with screenshots |
+| `H4_ORDERS="10,30;end;tab;level"` | Execute scripted movement and turn commands; useful with screenshots |
 
 ### Battlefield resource viewer
 

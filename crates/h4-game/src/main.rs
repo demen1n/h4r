@@ -5,7 +5,7 @@
 //!
 //! usage: h4-game [data dir]
 //! mouse: left click — walk there / attack; right drag — scroll; wheel — zoom
-//! keys: arrows/WASD — scroll, -/= — zoom, Space — centre on the army, Tab — next army,
+//! keys: arrows/WASD — scroll, -/= — zoom, Space — centre on the army, Tab — next army, U — surface/underground,
 //! Enter — end turn
 
 mod actor_view;
@@ -77,14 +77,16 @@ enum Order {
     Walk(Pos),
     EndTurn,
     NextArmy,
+    NextLevel,
 }
 
 impl Order {
-    /// `col,row`, `end` or `tab`; anything else is skipped.
+    /// `col,row`, `end`, `tab` or `level`; anything else is skipped.
     fn parse(s: &str) -> Option<Order> {
         match s.trim() {
             "end" => Some(Order::EndTurn),
             "tab" => Some(Order::NextArmy),
+            "level" => Some(Order::NextLevel),
             s => {
                 let (col, row) = s.split_once(',')?;
                 Some(Order::Walk(Pos { col: col.trim().parse().ok()?, row: row.trim().parse().ok()? }))
@@ -316,7 +318,7 @@ async fn main() {
         h4_formats::map::MapFile::read(&bytes, &path).unwrap_or_else(|e| panic!("{e}"))
     });
     let chosen_level: u8 = std::env::var("H4_LEVEL").ok().and_then(|l| l.parse().ok()).unwrap_or(0);
-    let (mut state, level, iso, relief, terrain, objects) = match &real_map {
+    let (mut state, mut level, mut iso, mut relief, terrain, mut objects) = match &real_map {
         Some(map) => {
             // what the random objects become, as the game decides at the start (normal difficulty)
             let setup = Setup::from_header(&map.header, 1);
@@ -341,7 +343,7 @@ async fn main() {
             (state, 0, iso, relief, terrain, objects)
         }
     };
-    let terrain = terrain.unwrap_or_else(|e| {
+    let mut terrain = terrain.unwrap_or_else(|e| {
         eprintln!("terrain: {e}");
         std::process::exit(1);
     });
@@ -374,11 +376,11 @@ async fn main() {
     let mut camera = Camera { pos: Vec2::ZERO, zoom: 1.28 };
     let map_center = vec2(iso.width as f32, iso.height as f32) / 2.0;
     // where a figure shows: its feet on the raised ground
-    let shown_at = |f: &Mover| {
-        let feet = f.feet(&iso);
-        feet - vec2(0.0, relief.ground_at(&iso, feet))
+    let shown_at = |f: &Mover, iso: &Iso, relief: &Relief| {
+        let feet = f.feet(iso);
+        feet - vec2(0.0, relief.ground_at(iso, feet))
     };
-    camera.center_on(play.selected_figure().map_or(map_center, shown_at));
+    camera.center_on(play.selected_figure().map_or(map_center, |f| shown_at(f, &iso, &relief)));
     // H4_OVERVIEW=1: start zoomed out over the whole map (handy with H4_SCREENSHOT)
     if std::env::var("H4_OVERVIEW").is_ok() {
         camera.zoom = (screen_width() / iso.width as f32).min(screen_height() / iso.height as f32);
@@ -388,8 +390,8 @@ async fn main() {
     // H4_SCREENSHOT=file.png: save one frame after things have loaded, then quit (for testing)
     let screenshot = std::env::var("H4_SCREENSHOT").ok();
     let mut frames = 0;
-    // H4_ORDERS="col,row;end;tab": orders given one by one, each once the last one has been
-    // shown (a click on a tile, end turn, next army). With H4_SCREENSHOT the picture is
+    // H4_ORDERS="col,row;end;tab;level": orders given one by one, each once the last one has been
+    // shown (a click on a tile, end turn, next army, switch level). With H4_SCREENSHOT the picture is
     // taken after the last one, to check walks and battles without a person.
     let mut orders: Vec<Order> = std::env::var("H4_ORDERS").map_or(Vec::new(), |s| s.split(';').filter_map(Order::parse).collect());
     orders.reverse(); // taken from the back
@@ -440,11 +442,32 @@ async fn main() {
         }
 
         // orders
-        let hover = relief.pick(&iso, camera.to_map(mouse));
         let order = if play.busy() { None } else { orders.pop() };
         if let Some(order) = &order {
             println!("order {order:?}");
         }
+        if (is_key_pressed(KeyCode::U) || order == Some(Order::NextLevel)) && !play.busy() {
+            if let Some(map) = real_map.as_ref().filter(|map| map.header.levels > 1) {
+                let next = (level + 1) % map.header.levels;
+                let next_relief = Relief::from_map(map, next as usize);
+                let next_iso = Iso::new(play.state.map.size, play.state.map.size, next_relief.max());
+                match TerrainView::build_map(&res, map, next as usize, &next_iso, &next_relief) {
+                    Ok(next_terrain) => {
+                        // Keep the same map location despite the new level's height margin.
+                        camera.pos += next_iso.tile_center(Pos { col: 0, row: 0 }) - iso.tile_center(Pos { col: 0, row: 0 });
+                        objects = placed_objects(&res, &play.state, next, &next_relief);
+                        terrain = next_terrain;
+                        relief = next_relief;
+                        iso = next_iso;
+                        level = next;
+                        play.show_level(level, &actors, &looks);
+                        drag_from = None;
+                    }
+                    Err(e) => play.message = format!("cannot show level: {e}"),
+                }
+            }
+        }
+        let hover = relief.pick(&iso, camera.to_map(mouse));
         if is_mouse_button_pressed(MouseButton::Left) {
             play.walk_to(hover);
         }
@@ -457,10 +480,10 @@ async fn main() {
         if order == Some(Order::NextArmy) {
             play.select_next();
         }
-        if order.is_some() || is_key_pressed(KeyCode::Tab) || is_key_pressed(KeyCode::Enter) {
+        if order.is_some_and(|o| o != Order::NextLevel) || is_key_pressed(KeyCode::Tab) || is_key_pressed(KeyCode::Enter) {
             // follow the selected army
             if let Some(f) = play.selected_figure() {
-                camera.center_on(shown_at(f));
+                camera.center_on(shown_at(f, &iso, &relief));
             }
         }
         if is_key_pressed(KeyCode::Tab) {
@@ -471,7 +494,7 @@ async fn main() {
         }
         if is_key_pressed(KeyCode::Space) {
             if let Some(f) = play.selected_figure() {
-                camera.center_on(shown_at(f));
+                camera.center_on(shown_at(f, &iso, &relief));
             }
         }
         play.update(&res, dt);
@@ -537,7 +560,7 @@ async fn main() {
         draw_text(play.status(), 12.0, 24.0, 24.0, WHITE);
         let under = play.army_at(hover).unwrap_or_default();
         draw_text(
-            format!("tile {},{}   zoom x{:.2}   {} fps   {under}", hover.col, hover.row, camera.zoom, get_fps()),
+            format!("level {level} (U: switch)   tile {},{}   zoom x{:.2}   {} fps   {under}", hover.col, hover.row, camera.zoom, get_fps()),
             12.0,
             46.0,
             18.0,
@@ -545,7 +568,7 @@ async fn main() {
         );
         draw_text(&play.message, 12.0, 68.0, 20.0, YELLOW);
         draw_text(
-            "click: walk / attack   tab: next army   enter: end turn   space: centre   right drag / arrows: scroll   wheel / - =: zoom",
+            "click: walk / attack   tab: next army   U: level   enter: end turn   space: centre   right drag / arrows: scroll   wheel / - =: zoom",
             12.0,
             screen_height() - 12.0,
             18.0,
