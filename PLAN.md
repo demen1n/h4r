@@ -1,379 +1,381 @@
-# План: открытый движок Heroes of Might and Magic IV
+# Plan: an open engine for Heroes of Might and Magic IV
 
-24 октября 2026, обновлён 31 октября
+English · [Русский](PLAN.ru.md)
 
-## Цель и рамки
+24 October 2026, updated 31 October
 
-Цель — открытый движок, на котором оригинальные «Герои 4» (с дополнениями) играются нативно на Mac, Windows и Linux, без Wine, с теми же правилами и тем же видом.
+## Goal and scope
 
-- **Данные** — из купленной копии игры: архивы `.h4r`, карты `.h4c`, видео, музыка. Движок их только читает и не распространяет.
-- **Код** — свой, на Rust. Декомпилят exe служит спецификацией: по нему понимаем, как работает игра, но в репозиторий его не копируем.
-- **Точность** — правила, формулы и поведение ИИ как в оригинале. Улучшения (широкие экраны, удобства, исправления багов) — отдельными настройками, выключенными по умолчанию.
-- **«Готово»** — проходится любая одиночная карта из установки и кампании дополнений, против ИИ и в хотсит, сохранения работают. Что именно это значит и как проверяется — в разделе «Рубежи и версия 1.0».
+The goal is an open engine that runs the original Heroes IV (with its expansions) natively on Mac, Windows and Linux, without Wine, with the same rules and the same look.
 
-Вне рамок на старте: совместимость с сохранениями оригинала, сетевая игра, редактор карт. Их место — в последнем этапе, и они не блокируют версию 1.0.
+- **Data** comes from a purchased copy of the game: `.h4r` archives, `.h4c` maps, video, music. The engine only reads it and does not distribute it.
+- **Code** is our own, in Rust. The decompiled exe serves as a specification: it tells us how the game works, but we don't copy it into the repository.
+- **Accuracy**: rules, formulas and AI behavior as in the original. Improvements (widescreen, quality of life, bug fixes) are separate settings, off by default.
+- **"Done"** means any single map from the installation and the expansion campaigns can be played through, against the AI and in hot-seat, and saves work. What exactly that means and how it's checked is in the "Milestones and version 1.0" section.
 
-## Что уже сделано
+Out of scope at the start: compatibility with the original's saves, multiplayer, a map editor. They belong to the last stage and do not block version 1.0.
 
-Заложен фундамент: читаем основную массу графики и данных, exe размечен в Ghidra, есть работающий прототип карты на Rust. Всё лежит в `~/Documents/projects/h4r` (git).
+## What's already done
 
-| Часть | Состояние |
+The foundation is in place: we read most of the graphics and data, the exe is annotated in Ghidra, and there is a working Rust map prototype. Everything lives in `~/Documents/projects/h4r` (git).
+
+| Part | State |
 | --- | --- |
-| Архивы `.h4r` | читаются полностью, порядок загрузки и алиасы как в игре |
-| Таблицы (существа, заклинания, навыки, артефакты, постройки, герои) | 13 из 13 в TSV |
-| Анимации существ и героев (`actor_sequence`) | 13 336 из 13 336, с тенями и точкой привязки |
-| Описания анимаций на карте (`adv_actor`) | 154 из 154: скорости, длины шага |
-| Интерфейс (`layers`), часть шрифтов | читаются |
-| Земля (`terrain`) | 61 из 61, правило стыковки найдено |
-| Переходы между землёй | формат и коды масок разобраны, приоритет из exe |
-| `heroes4.exe` в Ghidra | ~55 тыс. функций, 5293 имени перенесено с английской версии |
-| Механика | формула урона в бою, оба генератора случайных чисел бит-в-бит, enum способностей и типов земли |
-| Старт карты (`h4-rules`) | случайные объекты, герои и размеры стеков — по правилам exe, порядок проходов как в игре (`decomp/placement.md`) |
-| Модель состояния и правила карты | `h4-state` (`GameState`), ход армий, конец хода и новый день, рост нейтральных монстров — по exe; бой — заглушка с настоящим уроном |
-| Прототип `h4-game` | вертикальный срез на настоящих `.h4c`: играется на `GameState` через `h4-rules` (ход, нападение, бой, итог, конец хода, хотсит); земля мозаикой блоков как в игре и по сохранённым переходам, дороги, свет и подъём земли по высотам как в exe, объекты, армии, герои своими моделями |
+| `.h4r` archives | read in full, load order and aliases as in the game |
+| Tables (creatures, spells, skills, artifacts, buildings, heroes) | 13 of 13 in TSV |
+| Creature and hero animations (`actor_sequence`) | 13,336 of 13,336, with shadows and anchor point |
+| Map animation descriptions (`adv_actor`) | 154 of 154: speeds, step lengths |
+| Interface (`layers`), some fonts | read |
+| Terrain (`terrain`) | 61 of 61, tiling rule found |
+| Terrain transitions | format and mask codes worked out, priority from the exe |
+| `heroes4.exe` in Ghidra | ~55k functions, 5293 names transferred from the English version |
+| Mechanics | combat damage formula, both random number generators bit for bit, ability and terrain type enums |
+| Map start (`h4-rules`) | random objects, heroes and stack sizes by the exe's rules, pass order as in the game (`decomp/placement.md`) |
+| State model and map rules | `h4-state` (`GameState`), army movement, end of turn and new day, neutral monster growth by the exe; combat is a stub with real damage |
+| `h4-game` prototype | vertical slice on real `.h4c` files: plays on `GameState` through `h4-rules` (movement, attack, battle, outcome, end of turn, hot-seat); terrain as a block mosaic like the game and from stored transitions, roads, lighting and terrain elevation from heights as in the exe, objects, armies, heroes with their own models |
 
-Побочно для игры под Wine: быстрый `Mp3dec.asi` (репозиторий h4-mp3dec-fast), приглушённые звуки заклинаний, оконный режим.
+Side results for playing under Wine: a fast `Mp3dec.asi` (the h4-mp3dec-fast repository), quieter spell sounds, windowed mode.
 
-Тесты есть (`cargo test --workspace --locked`, 96 тестов: форматы в `h4-formats`, правила в `h4-rules`, плюс `h4-state` и `h4-game`): прогон по данным игры (все анимации, `adv_actor`, земля, переходы, `layers`; без игры пропускается) и негативные на синтетических байтах — обрезанные и испорченные файлы дают ошибку, отрисовка спрайтов и тайлов на кривых смещениях не падает. Добавлен `.github/workflows/ci.yml`: сборка всех целей и тесты без игровых данных на macOS, Linux и Windows с Rust 1.99.1; в README добавлен бейдж состояния CI (результат удалённого запуска здесь не проверялся). Логирования пока нет (сообщения через `eprintln!`).
+Tests exist (`cargo test --workspace --locked`, 96 tests: formats in `h4-formats`, rules in `h4-rules`, plus `h4-state` and `h4-game`): runs over game data (all animations, `adv_actor`, terrain, transitions, `layers`; skipped without the game) and negative tests on synthetic bytes: truncated and corrupted files return an error, and sprite and tile rendering doesn't crash on bad offsets. `.github/workflows/ci.yml` was added: builds all targets and runs tests without game data on macOS, Linux and Windows with Rust 1.99.1; a CI status badge was added to the README (the result of a remote run wasn't checked here). There is no logging yet (messages go through `eprintln!`).
 
-## Архитектура и стек
+## Architecture and stack
 
-Решение: Rust, workspace из нескольких крейтов. Главный принцип — правила игры не знают ничего о графике: тогда их можно проверять тестами и сверять с exe, а графическую библиотеку можно заменить, не трогая механику.
+Decision: Rust, a workspace of several crates. The main principle is that the game rules know nothing about graphics: that way they can be tested and verified against the exe, and the graphics library can be swapped without touching the mechanics.
 
 ```mermaid
 flowchart TD
-    data["Данные из купленной копии<br/>.h4r, .h4c, видео, музыка"] --> formats["h4-formats<br/>архивы, спрайты, земля, карты"]
-    exe["heroes4.exe в Ghidra<br/>отладочный мап, RTTI, декомпилят"] --> spec["Спецификация<br/>decomp/*.md, CLAUDE.md"]
-    formats --> state["h4-state<br/>мир, игроки, герои, армии, объекты"]
-    state --> rules["h4-rules<br/>бой, карта, города, ИИ, сохранения<br/>без графики, гоняется в тестах"]
-    spec -- логика --> rules
-    bench["Стенд сравнения (минимальный)<br/>отдельный инструмент, x86-код exe в Unicorn"] -- сверка --> rules
-    rules --> game["h4-game<br/>отрисовка, ввод, интерфейс, звук<br/>macroquad: Metal, DirectX, OpenGL"]
+    data["Data from a purchased copy<br/>.h4r, .h4c, video, music"] --> formats["h4-formats<br/>archives, sprites, terrain, maps"]
+    exe["heroes4.exe in Ghidra<br/>debug map, RTTI, decompilation"] --> spec["Specification<br/>decomp/*.md, CLAUDE.md"]
+    formats --> state["h4-state<br/>world, players, heroes, armies, objects"]
+    state --> rules["h4-rules<br/>combat, map, towns, AI, saves<br/>no graphics, runs in tests"]
+    spec -- logic --> rules
+    bench["Comparison testbench (minimal)<br/>separate tool, exe x86 code in Unicorn"] -- verification --> rules
+    rules --> game["h4-game<br/>rendering, input, interface, sound<br/>macroquad: Metal, DirectX, OpenGL"]
     formats --> game
     state --> game
-    formats --> tools["h4-viewer и примеры<br/>просмотр анимаций, дампы в PNG"]
+    formats --> tools["h4-viewer and examples<br/>animation viewer, PNG dumps"]
 ```
 
-Сейчас есть `h4-formats`, `h4-state` (модель состояния), `h4-rules` (урон, генераторы случайных чисел, расстановка случайных объектов, сборка состояния из карты, ход армий, конец хода, заглушка боя), `h4-game` (играет на `GameState`) и `h4-viewer`; минимальный стенд сравнения уже есть (`tools/testbench`). macroquad достаточно для 2D-игры этого уровня; если станет тесен, замена — SDL3 или wgpu, меняется только `h4-game`.
+Currently there are `h4-formats`, `h4-state` (the state model), `h4-rules` (damage, random number generators, random object placement, building state from a map, army movement, end of turn, the battle stub), `h4-game` (plays on `GameState`) and `h4-viewer`; the minimal comparison testbench already exists (`tools/testbench`). macroquad is enough for a 2D game of this level; if it gets too tight, the replacement is SDL3 or wgpu, and only `h4-game` changes.
 
-Границы подсистем:
+Subsystem boundaries:
 
-| Подсистема | Отвечает за | Не делает |
+| Subsystem | Responsible for | Does not do |
 | --- | --- | --- |
-| `h4-formats` | чтение и декодирование файлов игры | игровых решений |
-| модель состояния (условно `GameState`) | данные мира: карта, игроки, герои, армии, объекты, ресурсы, город | правил и отрисовки |
-| `h4-rules` | правила и переходы состояния: действие → новое состояние + события | ничего не рисует и не читает ввод |
-| `h4-game` | отрисовка, ввод, интерфейс, звук | не решает исход боя и не содержит критических правил: только показывает состояние и отправляет действия в правила |
-| инструменты проверки | тесты, сравнение с exe, диагностика | не входят в обычную сборку игры |
+| `h4-formats` | reading and decoding game files | game decisions |
+| state model (tentatively `GameState`) | world data: map, players, heroes, armies, objects, resources, towns | rules and rendering |
+| `h4-rules` | rules and state transitions: action → new state + events | draws nothing and reads no input |
+| `h4-game` | rendering, input, interface, sound | doesn't decide battle outcomes and holds no critical rules: only shows state and sends actions to the rules |
+| verification tools | tests, comparison with the exe, diagnostics | aren't part of the regular game build |
 
-Модель состояния выделена до полноценного этапа 4: бой и вертикальный срез уже работают с армиями и героями. Первая версия — крейт `h4-state`: обычные структуры, без правил и без зависимостей; `h4-game` уже играет на ней (`World` остался только для генерации тестовой карты). Конкретную структуру (обычные структуры или ECS) выбираем, когда станет понятен объём, а не заранее. Формат собственных сохранений — это сериализация той же модели с номером версии; закладываем версию сразу, даже если пользовательское сохранение появится позже.
+The state model was split out before full stage 4: combat and the vertical slice already work with armies and heroes. The first version is the `h4-state` crate: plain structs, no rules and no dependencies; `h4-game` already plays on it (`World` remains only for generating the test map). The concrete structure (plain structs or ECS) is chosen once the scope is clear, not in advance. Our own save format is a serialization of the same model with a version number; the version goes in right away, even if user-facing saves come later.
 
-## Этап 1 — форматы данных
+## Stage 1 — data formats
 
-Этап закрыт, когда каждый ресурс из архивов читается без ошибок и изображения совпадают с игрой. Работу ведём параллельно с остальными этапами: каждый формат разбираем, когда он понадобился.
+The stage is closed when every resource in the archives reads without errors and the images match the game. The work runs in parallel with the other stages: each format is worked out when it becomes needed.
 
-| Ресурс | Сколько | Зачем нужен | Когда |
+| Resource | Count | Why it's needed | When |
 | --- | --- | --- | --- |
-| `adv_object` | 2767 | объекты карты: деревья, горы, постройки, сокровища | этап 2 |
-| дороги и реки с масками `road`/`river` | — | сглаженные дороги и реки | этап 2 |
-| карты `.h4c` | 106 карт | настоящие карты и кампании | этап 3 |
-| `combat_actor`, `combat_object`, `battlefield_preset_map` | 158 + 1048 + 24 | бой: существа, препятствия, фоны полей | этап 4 |
-| `castle` | 19 | экраны городов | этап 5 |
-| `strings.*`, `bitmap_raw`, оставшиеся шрифты | 5 + 3 + 21 | тексты интерфейса, фоны меню, надписи | этап 6 |
-| звук (PCM/MP3), видео Bink | 1028 звуков, ролики | звук уже понятен, Bink — через готовый декодер или ffmpeg | этап 9 |
+| `adv_object` | 2767 | map objects: trees, mountains, buildings, treasures | stage 2 |
+| roads and rivers with `road`/`river` masks | — | smooth roads and rivers | stage 2 |
+| `.h4c` maps | 106 maps | real maps and campaigns | stage 3 |
+| `combat_actor`, `combat_object`, `battlefield_preset_map` | 158 + 1048 + 24 | combat: creatures, obstacles, battlefield backgrounds | stage 4 |
+| `castle` | 19 | town screens | stage 5 |
+| `strings.*`, `bitmap_raw`, remaining fonts | 5 + 3 + 21 | interface texts, menu backgrounds, labels | stage 6 |
+| sound (PCM/MP3), Bink video | 1028 sounds, videos | sound is already understood; Bink via a ready-made decoder or ffmpeg | stage 9 |
 
-Метод прежний: смотрим байты, ищем функцию чтения в отладочном мапе, декомпилируем её, пишем читатель в `h4-formats` и прогоняем его по всем файлам типа.
+The method is the same as before: look at the bytes, find the reading function in the debug map, decompile it, write a reader in `h4-formats` and run it over all files of that type.
 
-Формат считается разобранным на одном из трёх уровней, и в реестре указывается достигнутый:
+A format counts as worked out at one of three levels, and the registry records the level reached:
 
-1. **Структурно** — файлы читаются безопасно: длины, смещения и размеры массивов проверяются, чтение не выходит за границы, остаток после разбора объяснён (у `terrain` и `transition` уже проверяется «ровно до конца»).
-2. **Семантически** — поля, координаты, идентификаторы и ссылки значат то, что мы думаем: проверено по коду игры, по согласованности данных (например, ссылки на существующие ресурсы, координаты внутри карты) или по сравнению с оригиналом. Чтение до последнего байта само по себе этого не доказывает.
-3. **В использовании** — ресурс правильно отображается или применяется логикой; подтверждено сравнением с игрой.
+1. **Structural**: files read safely: lengths, offsets and array sizes are checked, reading doesn't go out of bounds, and anything left after parsing is explained (`terrain` and `transition` are already checked to read "exactly to the end").
+2. **Semantic**: fields, coordinates, identifiers and references mean what we think they do: checked against the game's code, by data consistency (e.g. references to existing resources, coordinates inside the map) or by comparison with the original. Reading to the last byte doesn't prove this on its own.
+3. **In use**: the resource is displayed correctly or applied by the logic; confirmed by comparison with the game.
 
-Реестр форматов — `FORMATS.md`: тип ресурса, версии игры, уровень, чем проверено, известные ограничения.
+The format registry is `FORMATS.md`: resource type, game versions, level, how it was checked, known limitations.
 
-Неизвестные данные. Читатель не должен падать: он возвращает ошибку с именем ресурса, смещением и тем, что ожидалось. Пропускать неизвестный объект и читать дальше можно, только если формат даёт его длину (как у записей `.h4r`); для форматов без длин (`.h4c` в его текущем понимании) неизвестный тип объекта — ошибка чтения карты, а не молчаливый пропуск.
+Unknown data. A reader must not crash: it returns an error with the resource name, the offset and what was expected. Skipping an unknown object and reading on is allowed only if the format gives its length (as with `.h4r` entries); for formats without lengths (`.h4c` as we currently understand it), an unknown object type is a map reading error, not a silent skip.
 
-## Этап 2 — карта приключений (отрисовка)
+## Stage 2 — adventure map (rendering)
 
-Итог этапа — карта, которую на скриншоте не отличить от оригинала. Пока на тестовой карте, без правил игры.
+The result of the stage is a map that can't be told apart from the original in a screenshot. On a test map for now, without game rules.
 
-1. Объекты карты (`adv_object`): деревья, горы, скалы, постройки, ресурсы. У них есть след на карте (какие клетки заняты) и клетка входа.
-2. Сортировка по глубине: объекты, герои и существа в одном списке, правильное перекрытие.
-3. Дороги и реки через их наборы масок.
-4. Исправить спорное в переходах: ступенчатое мелководье, выбор варианта маски. Источник правды — декомпилят `transition_calculator.cpp`.
-5. Подземный уровень и переключение между уровнями.
-6. Туман войны: свои маски в игре есть (`t_shroud_transition_calculator`).
-7. Анимации объектов (мельницы, водовороты), флаги игроков на объектах и героях.
-8. Путь героя стрелками, курсоры, мини-карта.
-9. Рельеф: свет и подъём земли, объектов и армий по высотам вершин (`decomp/heights.md`).
+1. Map objects (`adv_object`): trees, mountains, rocks, buildings, resources. They have a footprint on the map (which tiles are occupied) and an entry tile.
+2. Depth sorting: objects, heroes and creatures in one list, correct overlap.
+3. Roads and rivers through their mask sets.
+4. Fix the questionable parts of transitions: stair-stepped shallows, mask variant selection. The source of truth is the decompiled `transition_calculator.cpp`.
+5. The underground level and switching between levels.
+6. Fog of war: the game has its own masks (`t_shroud_transition_calculator`).
+7. Object animations (windmills, whirlpools), player flags on objects and heroes.
+8. Hero path arrows, cursors, the minimap.
+9. Relief: lighting and elevation of terrain, objects and armies from vertex heights (`decomp/heights.md`).
 
-Сделано: 1, 2 (порядок по столбцам глубины — своё правило), 3 (дороги и реки по маскам; на настоящих картах — сохранённые в карте), 5 (`H4_LEVEL` при старте, `U` переключает уровень в игре; #32), 9 (кроме мостов). Анимации объектов есть, флагов нет.
+Done: 1, 2 (order by depth columns, our own rule), 3 (roads and rivers via masks; on real maps, those stored in the map), 5 (`H4_LEVEL` at startup, `U` switches the level in game; #32), 9 (except bridges). Object animations exist, flags don't.
 
-Критерий: скриншоты одного и того же места в оригинале и у нас совпадают попиксельно или почти (после этапа 3, когда будет одна и та же карта).
+Criterion: screenshots of the same place in the original and in ours match pixel for pixel or nearly so (after stage 3, once it's the same map).
 
-Этапы 2 и 3 идут вперемешку, а не строго друг за другом: не ждём, пока тестовая карта станет идеальной, чтобы взяться за настоящие. Цикл такой:
+Stages 2 and 3 are interleaved rather than strictly sequential: we don't wait for the test map to be perfect before taking on real ones. The cycle is:
 
-1. искусственная тестовая карта (есть);
-2. чтение минимальной настоящей карты — сделанной в редакторе, с одним-двумя объектами;
-3. отображение прочитанного;
-4. сравнение с оригиналом и исправление расхождений;
-5. расширение на все карты установки.
+1. an artificial test map (exists);
+2. reading a minimal real map, made in the editor, with one or two objects;
+3. displaying what was read;
+4. comparing with the original and fixing discrepancies;
+5. extending to all installed maps.
 
-## Этап 3 — оригинальные карты `.h4c`
+## Stage 3 — original `.h4c` maps
 
-Итог — любая из 106 карт установки открывается и показывается целиком: земля, объекты, города, герои, монстры. Это самый трудный формат: карта — сериализация всего состояния подряд, и чтобы добраться до тайлов, нужно точно прочитать всё до них.
+The result: any of the 106 installed maps opens and is shown in full: terrain, objects, towns, heroes, monsters. This is the hardest format: a map is a sequential serialization of the whole state, and to reach the tiles you have to read everything before them exactly.
 
-1. Заголовок: `H4CAMPAIGN` + gzip (уже известно), далее описание, размеры, игроки, условия победы.
-2. Декомпиляция `t_adventure_map::read` и всех `read`, которые она вызывает. Важно версионирование: поля добавлялись от версии к версии (база, Gathering Storm, Winds of War).
-3. Тайлы (`t_abstract_tile::read`): тип земли + подтип, дороги, реки, переходы, высота.
-4. Объекты: ~70 классов `t_adv_*`, у каждого свой `read`. Начинаем с простых (декорации, ресурсы), сложные (города, скриптовые) — в конце.
-5. Скрипты карт (~120 классов `t_script_*`) на этом этапе только читаем и пропускаем, исполняем на этапе 8.
-6. Тест: все 106 карт читаются до последнего байта, как сейчас с анимациями. Это необходимое, но не достаточное условие: дополнительно проверяем смысл (размеры карты совпадают с заявленными, координаты объектов внутри карты, ссылки на ресурсы существуют) и сверяем отображение с оригиналом.
+1. Header: `H4CAMPAIGN` + gzip (already known), then description, sizes, players, victory conditions.
+2. Decompile `t_adventure_map::read` and all the `read` functions it calls. Versioning matters: fields were added from version to version (base game, Gathering Storm, Winds of War).
+3. Tiles (`t_abstract_tile::read`): terrain type + subtype, roads, rivers, transitions, height.
+4. Objects: ~70 `t_adv_*` classes, each with its own `read`. We start with simple ones (decorations, resources); complex ones (towns, scripted objects) come last.
+5. Map scripts (~120 `t_script_*` classes) are only read and skipped at this stage, and executed at stage 8.
+6. Test: all 106 maps read to the last byte, as animations do now. This is necessary but not sufficient: we also check the meaning (map sizes match the declared ones, object coordinates are inside the map, resource references exist) and verify the display against the original.
 
-Формат `.h4c` читается подряд до конца на всех 106 картах (заголовок, события, скрипты, объекты, тайлы); смысл многих полей ещё не разобран — подтверждаем по мере использования.
+The `.h4c` format reads sequentially to the end on all 106 maps (header, events, scripts, objects, tiles); the meaning of many fields is still unknown and gets confirmed as they are used.
 
-Риск: одна неверно прочитанная структура сбивает всё, что после неё. Помогает редактор карт из установки: можно сохранять минимальные карты и сравнивать файлы до и после одного изменения.
+Risk: one misread structure throws off everything after it. The map editor from the installation helps: you can save minimal maps and compare files before and after a single change.
 
-## Контрольная точка — вертикальный срез
+## Checkpoint — vertical slice
 
-Ранний сквозной сценарий, который проверяет, что подсистемы стыкуются, задолго до того, как каждая из них готова: небольшая карта, герой и объект или город, переход хода, герой нападает на монстра, запускается бой, результат боя (потери, опыт, исчезнувший монстр) записывается обратно в состояние карты.
+An early end-to-end scenario that checks that subsystems fit together, long before each of them is ready: a small map, a hero and an object or town, passing the turn, the hero attacks a monster, a battle starts, and the battle's result (losses, experience, the monster gone) is written back into the map state.
 
-Срез выполнен на искусственной и настоящих `.h4c`: `GameState`, движение, нападение, бой-заглушка, запись потерь и опыта, конец хода и хотсит; автоматизация — `H4_ORDERS` + `H4_SCREENSHOT`. Это проверка интеграции, а не полноты боевых правил.
+The slice is complete on the artificial map and real `.h4c` files: `GameState`, movement, attack, the battle stub, recording losses and experience, end of turn and hot-seat; automation via `H4_ORDERS` + `H4_SCREENSHOT`. This is an integration check, not a measure of how complete the combat rules are.
 
-## Этап 4 — бой
+## Stage 4 — combat
 
-Итог — бой двух армий по правилам оригинала, сначала человек против человека. Бой замкнут в себе, его можно делать параллельно с картой и собирать отдельным стендом «выбери две армии — дерись».
+The result: a battle between two armies by the original rules, human against human at first. Combat is self-contained, so it can be done in parallel with the map and built as a separate "pick two armies and fight" sandbox.
 
-1. Поле боя: фон (`battlefield_preset_map`, земля из метатайлов), сетка клеток, препятствия (`combat_object`, `table.combat_obstacles`).
-2. Существа на поле: `combat_actor` (как `adv_actor`, но для боя), размер на сетке (нативный округлый футпринт диаметром 3–7 мелких клеток), анимации атаки, реакции, смерти.
-3. Очередь ходов по скорости, ожидание, защита, мораль.
-4. Перемещение с поиском пути, зоны контроля, летуны.
-5. Атака: формула урона уже есть (атака/защита, пределы 0,05–20, обереги, огонь/холод), ответный удар, стрельба со штрафом за дистанцию и препятствия, удача.
-6. Способности существ: ~85 штук (enum уже известен), берём по одной из `attack.cpp`, `combat_creature.cpp` и других.
-7. Заклинания: цифры и флаги из `table.Spells`, особые — отдельными классами (`fireball.cpp`, `mass_spell.cpp`, `chain_lightning.cpp`…). Длинный хвост, идёт параллельно с другими этапами.
-8. Герои в бою: в Четвёрке они — обычные участники боя со своими атаками.
-9. Осада: стены, ворота, башни.
-10. Итог боя: потери, опыт, воскрешение, сдача и бегство.
+1. Battlefield: the background (`battlefield_preset_map`, terrain from metatiles), the cell grid, obstacles (`combat_object`, `table.combat_obstacles`).
+2. Creatures on the field: `combat_actor` (like `adv_actor`, but for combat), size on the grid (native rounded footprint 3–7 small cells in diameter), attack, reaction and death animations.
+3. Turn queue by speed, wait, defend, morale.
+4. Movement with pathfinding, zones of control, fliers.
+5. Attack: the damage formula already exists (attack/defense, limits 0.05–20, wards, fire/cold), retaliation, shooting with distance and obstacle penalties, luck.
+6. Creature abilities: ~85 of them (the enum is already known), taken one at a time from `attack.cpp`, `combat_creature.cpp` and others.
+7. Spells: numbers and flags from `table.Spells`, special ones as separate classes (`fireball.cpp`, `mass_spell.cpp`, `chain_lightning.cpp`…). A long tail that runs in parallel with the other stages.
+8. Heroes in combat: in Heroes IV they are regular combat participants with their own attacks.
+9. Siege: walls, gates, towers.
+10. Battle outcome: losses, experience, resurrection, surrender and retreat.
 
-Правила боя живут в крейте правил без графики: так их можно гонять тысячами в тестах и сравнивать с оригиналом.
+The combat rules live in the rules crate without graphics, so they can be run by the thousands in tests and compared with the original.
 
-Для воспроизводимости бой с самого начала устроен так:
+For reproducibility, combat is built this way from the very start:
 
-- состояние боя + список действий игроков однозначно определяют результат при заданном источнике случайности; случайность передаётся в правила явно (генератор с зерном), а не берётся из глобального;
-- правила пишут простой журнал событий («ход стека», «урон 37 по стеку 2», «сработал огненный щит»): по нему видно, какой эффект и как изменил состояние;
-- найденное расхождение сохраняется как минимальный сценарий (начальное состояние, зерно, действия) и становится тестом.
+- battle state + the list of player actions fully determine the result for a given source of randomness; randomness is passed to the rules explicitly (a seeded generator), not taken from a global one;
+- the rules write a simple event log ("stack's turn", "37 damage to stack 2", "fire shield triggered"): it shows which effect changed the state and how;
+- any discrepancy found is saved as a minimal scenario (initial state, seed, actions) and becomes a test.
 
-Генераторы случайных чисел оригинала восстановлены бит-в-бит (`decomp/random.md`, `h4-rules/src/random.rs`): глобальный засевается `time()`, боевой берёт число по индексу из (id, id, назначение, счётчик). Это делает сверку с exe возможной, но не гарантирует её: нужно ещё совпадение зерна, счётчиков и порядка вызовов, а это проверено пока только на коде, не на живом бою. Глобальный RNG сверен на 8 зернах по 256 чисел; боевой RNG — на 16 последовательностях. При модуле 1 найдена и сохранена особенность кэша, из-за которой малые индексы могут зависеть от порядка бросков; встречается ли этот модуль в настоящем бою, пока неизвестно.
+The original's random number generators are restored bit for bit (`decomp/random.md`, `h4-rules/src/random.rs`): the global one is seeded with `time()`, the combat one takes a number by index from (id, id, purpose, counter). This makes verification against the exe possible but doesn't guarantee it: the seed, the counters and the call order must match too, and so far that has been checked only on code, not in a live battle. The global RNG is verified on 8 seeds of 256 numbers each; the combat RNG on 16 sequences. With modulus 1, a cache quirk was found and preserved that can make small indices depend on the order of rolls; whether this modulus occurs in a real battle is still unknown.
 
-Начато 31 октября: читатель `combat_actor` v5/v6 — все 158 видимых ресурсов без остатка; проверка обычных ссылок и декодирования анимаций, режим просмотрщика `--combat` с частотой и направлениями из описаний. Производные анимации `full_walk`/`wait_and_base` и смысл части полей ещё требуют исследования (`decomp/combat_actor.md`). Поле боя (1 ноября): читатели `battlefield_preset_map` (24 ресурса) и `combat_object` (1048 ресурсов) — все без остатка. Восстановлены по exe и сверены векторами: значения карты поля (коды наложения 0/1/2/255 и контекст боя на мосту), центры клеток, проверка занятости клетки, круглые маски препятствий, разбиение составных препятствий с обрезкой картинки (`decomp/battlefield.md`, `decomp/combat_object.md`). Просмотрщик `h4-battlefield` показывает фон, сетку и поставленное вручную препятствие. Автоматическая расстановка препятствий (`t_combat_obstacle_placer`) перенесена и совпала с оригиналом на 48 сценариях (`decomp/obstacle_placement.md`), кроме финального прорубания отрезанных участков. Не сделаны: это прорубание (нужен боевой поиск пути), смысл двух единиц заголовка карты поля, начальная земля боя, точная сортировка по глубине оригинала (в просмотрщике есть общая геометрическая очередь сегментов) и управляемый бой; расстановка армий обычного боя добавлена в #57; осада и вид на экране с оригиналом не сверены.
+Started 31 October: the `combat_actor` v5/v6 reader, all 158 visible resources with nothing left over; checks of ordinary references and animation decoding, a `--combat` viewer mode with frame rate and directions from the descriptions. The derived animations `full_walk`/`wait_and_base` and the meaning of some fields still need research (`decomp/combat_actor.md`). Battlefield (1 November): readers for `battlefield_preset_map` (24 resources) and `combat_object` (1048 resources), all with nothing left over. Restored from the exe and verified with vectors: battlefield map values (overlay codes 0/1/2/255 and the on-bridge battle context), cell centers, the cell occupancy check, round obstacle masks, splitting of composite obstacles with image cropping (`decomp/battlefield.md`, `decomp/combat_object.md`). The `h4-battlefield` viewer shows the background, the grid and a manually placed obstacle. Automatic obstacle placement (`t_combat_obstacle_placer`) is ported and matched the original on 48 scenarios (`decomp/obstacle_placement.md`), except for the final carving of cut-off areas. Not done: that carving (needs combat pathfinding), the meaning of the two ones in the battlefield map header, the initial battle terrain, the original's exact depth sorting (the viewer has a shared geometric segment queue) and a playable battle; deployment of armies in a normal battle was added in #57; siege and the on-screen look aren't verified against the original.
 
-Модель состояния #53: `h4_rules::battle::BattleState` создаётся из двух `MapArmy` и подготовленного поля. Хранит участников/слоты, копии статов, HP и выстрелы стеков, явное размещение, очередь с нативной инициативой или порядком фикстуры, RNG с его счётчиками/кэшем и журнал. JSON-снимок можно восстановить без игры и продолжить с теми же бросками и событиями. Начальные позиции обычного боя и сжатие трёх строев реализованы в #57 (`decomp/deployment.md`); инициатива, ожидание и защита добавлены в #60 (`decomp/initiative.md`, 1619 фикстур exe); урон и интеграция с картой остаются в #68/#75; герои пока хранятся без боевых статов (#71). Подробности — `docs/battle_state.md`.
+State model #53: `h4_rules::battle::BattleState` is created from two `MapArmy` and a prepared field. It stores participants/slots, copies of stats, stack HP and shots, explicit placement, a queue with native initiative or fixture order, the RNG with its counters/cache, and a log. A JSON snapshot can be restored without the game and continued with the same rolls and events. Initial positions in a normal battle and compression of the three formations are implemented in #57 (`decomp/deployment.md`); initiative, wait and defend were added in #60 (`decomp/initiative.md`, 1619 exe fixtures); damage and map integration remain in #68/#75; heroes are stored without combat stats for now (#71). Details are in `docs/battle_state.md`.
 
-## Этап 5 — механика карты приключений
+## Stage 5 — adventure map mechanics
 
-Итог — одиночную карту можно пройти в хотсите (несколько людей за одним компьютером), без ИИ. Это самый объёмный этап по числу мелких правил.
+The result: a single map can be played through in hot-seat (several people at one computer), without AI. This is the biggest stage in terms of small rules.
 
-1. Ходы, дни и недели, очерёдность игроков.
-2. Армии: до 7 стеков, герои как часть армии, армии без героя, караваны.
-3. Очки движения: стоимость по земле и дорогам, скорость самого медленного стека, навыки и артефакты. Поиск пути как в игре (`adventure_path_finder.cpp`).
-4. Ресурсы и доходы: золото и 6 редких, шахты, захват объектов.
-5. Объекты карты: ~70 типов (храмы, сундуки, жилища, телепорты, сфинксы…). Идём от частых к редким, цифры из `table.Adventure Object`.
-6. Монстры на карте: нападение, бегство, присоединение, еженедельный рост.
-7. Города: 6 фракций, постройки и их условия (`town.cpp`: `t_requires`, `t_and`, `t_or`), найм, гильдия магов, таверна.
-8. Герои: классы, опыт и уровни, навыки и их веса (`table.skills`, `table.skill_weights`), артефакты, книга заклинаний на карте.
-9. Условия победы и поражения.
+1. Turns, days and weeks, player order.
+2. Armies: up to 7 stacks, heroes as part of an army, armies without a hero, caravans.
+3. Movement points: cost by terrain and roads, the speed of the slowest stack, skills and artifacts. Pathfinding as in the game (`adventure_path_finder.cpp`).
+4. Resources and income: gold and 6 rare resources, mines, object capture.
+5. Map objects: ~70 types (temples, chests, dwellings, teleporters, sphinxes…). We go from common to rare, with numbers from `table.Adventure Object`.
+6. Monsters on the map: attacking, fleeing, joining, weekly growth.
+7. Towns: 6 factions, buildings and their requirements (`town.cpp`: `t_requires`, `t_and`, `t_or`), recruiting, the mage guild, the tavern.
+8. Heroes: classes, experience and levels, skills and their weights (`table.skills`, `table.skill_weights`), artifacts, the spellbook on the map.
+9. Victory and defeat conditions.
 
-Начато: 1 (очерёдность игроков, новый день; недель и месяцев нет), 3 (стоимость шага, очки движения, Дейкстра; навыков, артефактов и порядка поиска пути игры нет), 6 (ежедневный рост нейтральных стеков; нападение — через заглушку боя). Игроки без человека пропускают ход — ИИ нет.
+Started: 1 (player order, new day; no weeks or months), 3 (step cost, movement points, Dijkstra; no skills, artifacts or the game's pathfinding order), 6 (daily growth of neutral stacks; attacking goes through the battle stub). Players without a human skip their turn: there is no AI.
 
-## Этап 6 — интерфейс
+## Stage 6 — interface
 
-Итог — все экраны игры из оригинальной графики, с русскими текстами из `text.h4r`. Делается вперемешку с этапами 4 и 5: каждое правило нужно чем-то показать.
+The result: all game screens built from the original graphics, with the Russian texts from `text.h4r`. Done alongside stages 4 and 5, since every rule needs some way of being shown.
 
-Полная система экранов не нужна для ранних прототипов. Параллельно с картой и боем развивается только UI-фундамент: ввод мыши и клавиатуры, единая система координат и масштабирования, вывод текста и картинок, клики и фокус, базовые окна и подсказки. На Retina и нестандартных разрешениях сразу проверяем, что клик попадает в нужный элемент (сейчас прототип уже переводит координаты мыши в клетки карты с учётом масштаба).
+A full screen system isn't needed for early prototypes. Only the UI foundation is developed alongside the map and combat: mouse and keyboard input, a single coordinate and scaling system, text and image output, clicks and focus, basic windows and tooltips. On Retina and non-standard resolutions we check right away that a click lands on the right element (the prototype already converts mouse coordinates to map tiles with scale taken into account).
 
-1. Система окон: кнопки (`layers.button.*` — уже читаются), прокрутка, списки, подсказки по правой кнопке.
-2. Шрифты оригинала и вывод текста cp1251.
-3. Рамка карты приключений: панель героев и городов, ресурсы, дата, мини-карта.
-4. Экраны: город, герой, книга заклинаний, обмен армиями, обзор королевства, диалоги объектов.
-5. Интерфейс боя: панель, журнал, сдача/бегство, итоги.
-6. Главное меню, выбор карты, настройки.
-7. Разрешения экрана: оригинал рассчитан на 800×600–1280×1024, нужна растяжка под современные и Retina-экраны без мыла.
+1. Window system: buttons (`layers.button.*`, already read), scrolling, lists, right-click tooltips.
+2. The original's fonts and cp1251 text output.
+3. The adventure map frame: heroes and towns panel, resources, date, minimap.
+4. Screens: town, hero, spellbook, army exchange, kingdom overview, object dialogs.
+5. Combat interface: panel, log, surrender/retreat, results.
+6. Main menu, map selection, settings.
+7. Screen resolutions: the original targets 800×600–1280×1024; we need scaling for modern and Retina displays without blur.
 
-Раскладки окон, судя по именам (`layers.dialog.*`), лежат в данных: позиции элементов не придётся подбирать на глаз. Это предположение, проверим на первом же окне.
+Window layouts, judging by the names (`layers.dialog.*`), are in the data, so element positions won't have to be fitted by eye. This is an assumption; we'll check it on the very first window.
 
-## Этап 7 — ИИ
+## Stage 7 — AI
 
-Итог — компьютер играет как в оригинале, со всеми его сильными и слабыми сторонами. Это единственная часть, которую нельзя восстановить по наблюдениям, только по коду.
+The result: the computer plays as it does in the original, with all its strengths and weaknesses. This is the one part that can't be restored from observation, only from the code.
 
-1. **Боевой ИИ** (`combat_ai.cpp`): набор действий уже известен по классам (`t_combat_ai_melee_action`, `_ranged_*`, `_spell_*`, `_move_`, `_wait_`, `_defend_`). Нужны их оценки и веса, в том числе ценность заклинаний (`get_damage_spell_value` и подобные). Начинаем с него: он меньше и сразу даёт играбельный бой против компьютера.
-2. **Стратегический ИИ** (`adventure_ai.cpp`): ценность объектов и целей, оценка угроз, маршруты героев, строительство и найм в городах. Самый большой и запутанный кусок кода.
-3. Помощники ИИ: `t_ai_army_data_cache`, симуляция боя для оценки силы (`t_simulated_combat_creature`), веса заклинаний из столбцов AI в `table.Spells`.
+1. **Combat AI** (`combat_ai.cpp`): the set of actions is already known from the classes (`t_combat_ai_melee_action`, `_ranged_*`, `_spell_*`, `_move_`, `_wait_`, `_defend_`). We need their scores and weights, including spell values (`get_damage_spell_value` and the like). We start with it: it's smaller and immediately gives playable combat against the computer.
+2. **Strategic AI** (`adventure_ai.cpp`): the value of objects and goals, threat assessment, hero routes, building and recruiting in towns. The biggest and most tangled piece of code.
+3. AI helpers: `t_ai_army_data_cache`, battle simulation for strength estimates (`t_simulated_combat_creature`), spell weights from the AI columns in `table.Spells`.
 
-Тут нужна наибольшая точность переноса: поструктурная разметка в Ghidra, структуры данных и проверка решений на одинаковых ситуациях в оригинале и у нас. Пока оценки оригинала восстановлены только частично (известны классы действий, но не их веса).
+This is where port accuracy matters most: struct-by-struct annotation in Ghidra, data structures, and checking decisions on identical situations in the original and in ours. So far the original's scores are only partly restored (the action classes are known, but not their weights).
 
-Граница: ИИ получает состояние и список доступных действий от правил и возвращает выбранное действие — правила боя и карты от реализации ИИ не зависят. За этой границей две реализации:
+Boundary: the AI receives the state and the list of available actions from the rules and returns the chosen action; the combat and map rules don't depend on the AI implementation. Behind this boundary there are two implementations:
 
-- **простой базовый ИИ** — для ранней играбельности, раньше этапа 7;
-- **совместимый с оригиналом ИИ** — цель этапа.
+- **a simple basic AI**, for early playability, before stage 7;
+- **an AI compatible with the original**, the goal of the stage.
 
-Обе умеют выводить для диагностики список доступных действий и их оценки, чтобы расхождения с оригиналом можно было разбирать по шагам.
+Both can output the list of available actions and their scores for diagnostics, so discrepancies with the original can be analyzed step by step.
 
-## Этап 8 — кампании, скрипты, сохранения
+## Stage 8 — campaigns, scripts, saves
 
-Итог — проходятся кампании с сюжетными событиями, игру можно сохранить и загрузить. Внутри четыре отдельных результата:
+The result: campaigns with story events can be played through, and the game can be saved and loaded. There are four separate deliverables inside:
 
-1. **Собственные сохранения** текущей одиночной карты: сериализация модели состояния с версией формата (версия закладывается раньше, см. «Архитектура»). Проще и надёжнее, чем формат оригинала. Можно сделать раньше этапа 8, как только есть модель состояния.
-2. **Интерпретатор скриптов карт**: дерево условий и действий (~120 классов `t_script_*`), триггеры (наступил день, герой вошёл на клетку, объект захвачен), переменные, сообщения.
-3. **Кампании**: цепочка карт, перенос героев и артефактов, выбор пути. Ролики между картами — на этапе 9. Приёмочный тест — прогон всех кампаний от начала до конца.
-4. **Импорт сохранений оригинала** — отдельная необязательная задача, не блокирует 1.0. Предположение: при готовом чтении карт это тот же формат с дополнениями; проверить, когда дойдём.
+1. **Our own saves** of the current single map: serialization of the state model with a format version (the version goes in earlier, see "Architecture"). Simpler and more reliable than the original's format. Can be done before stage 8, as soon as the state model exists.
+2. **Map script interpreter**: a tree of conditions and actions (~120 `t_script_*` classes), triggers (a day has come, a hero entered a tile, an object was captured), variables, messages.
+3. **Campaigns**: map chains, carrying over heroes and artifacts, path choice. Videos between maps are in stage 9. The acceptance test is playing through all campaigns from start to finish.
+4. **Importing saves from the original** is a separate optional task that doesn't block 1.0. Assumption: with map reading done, it's the same format with additions; to be checked when we get there.
 
-## Этап 9 — звук, видео, сеть, редактор, полировка
+## Stage 9 — sound, video, multiplayer, editor, polish
 
-Итог — игра ощущается законченной. Часть пунктов (звук, музыка) стоит подключить раньше, они простые и сильно оживляют прототип. В обязательства версии 1.0 входят звук, музыка и видео; сеть, редактор и моды — нет.
+The result: the game feels finished. Some items (sound, music) are worth hooking up earlier; they're simple and bring the prototype to life. Version 1.0 commits to sound, music and video; multiplayer, the editor and mods are not included.
 
-1. Звук и музыка: PCM и MP3 из `sound.*` (формат известен), музыка по типу земли и городу, звуки анимаций, русская озвучка.
-2. Видео Bink (интро, ролики кампаний) — через существующий открытый декодер.
-3. Сетевая игра: свой протокол, совместимость с оригиналом не нужна.
-4. Редактор карт — по желанию, оригинальный пока работает под Wine.
-5. Поддержка модов: Equilibris и подобные (правки видны сравнением `h4mod.exe` с `heroes4.exe`).
-6. Удобства: широкие экраны, масштаб, быстрые бои, горячие клавиши.
+1. Sound and music: PCM and MP3 from `sound.*` (the format is known), music by terrain type and town, animation sounds, Russian voice-over.
+2. Bink video (intro, campaign videos), through an existing open decoder.
+3. Multiplayer: our own protocol; compatibility with the original isn't needed.
+4. Map editor: optional; the original one works under Wine for now.
+5. Mod support: Equilibris and similar (the changes can be seen by comparing `h4mod.exe` with `heroes4.exe`).
+6. Quality of life: widescreen, scaling, fast battles, hotkeys.
 
-## Как проверяем соответствие оригиналу
+## How we verify conformance with the original
 
-Узкое место всего проекта — не написать код, а доказать, что он ведёт себя как оригинал. Для этого четыре способа, от дешёвого к дорогому.
+The bottleneck of the whole project isn't writing the code but proving that it behaves like the original. There are four methods for that, from cheap to expensive.
 
-| Способ | Что проверяет | Как |
+| Method | What it checks | How |
 | --- | --- | --- |
-| Разбор всех файлов типа | форматы | примеры `check_sequences`: чтение до последнего байта, 0 ошибок |
-| Сравнение скриншотов | отрисовка | одно и то же место в оригинале (под Wine) и в `h4-game` (`H4_SCREENSHOT`), разница по пикселям |
-| Тестовый стенд функций exe | формулы и правила | оригинальный x86-код исполняется в Unicorn с заданными входами; те же входы — в `h4-rules`, ответы сверяем |
-| Игра человеком | ощущения, ИИ | одна и та же карта параллельно в оригинале и у нас |
+| Parsing all files of a type | formats | `check_sequences` examples: reading to the last byte, 0 errors |
+| Comparing screenshots | rendering | the same place in the original (under Wine) and in `h4-game` (`H4_SCREENSHOT`), per-pixel difference |
+| Exe function testbench | formulas and rules | the original x86 code runs in Unicorn with given inputs; the same inputs go into `h4-rules`, and the answers are compared |
+| Human playtesting | feel, AI | the same map side by side in the original and in ours |
 
-Минимальный стенд функций сделан к началу этапа 4 (31 октября); инструкция и точные границы проверки — `tools/testbench/README.md`.
+The minimal function testbench was built by the start of stage 4 (31 October); instructions and the exact limits of what it checks are in `tools/testbench/README.md`.
 
-Чтобы это был повторяемый процесс, а не разовые проверки:
+To make this a repeatable process rather than one-off checks:
 
-1. **Регрессионные тесты форматов в `cargo test`** (начато: `h4-formats/tests/game_data.rs`). Проверки из примеров перенесены в тесты, которые читают данные из `$H4_DATA` и пропускаются, если игры нет. В репозиторий кладём только ожидаемые значения, выведенные из данных (размеры, число кадров, координаты, контрольные суммы декодированных картинок), но не сами ресурсы и не картинки из игры.
-2. **Проверка смысла, а не только длины**: диапазоны полей, координаты внутри своих рамок, ссылки на существующие ресурсы и анимации, согласованность связанных файлов (`adv_actor` ссылается на существующие `actor_sequence`).
-3. **Негативные тесты**: обрезанные, испорченные и неправдоподобные входные данные дают ошибку, а не панику и не выход за границы. Синтетические входы можно собирать прямо в тесте, без игровых данных. Сюда же — проверка индексов при отрисовке спрайтов и тайлов.
-4. **Сравнение с exe** — отдельный инструмент `tools/testbench/compare.py`, не часть обычной сборки: требует Unicorn и поддержанную копию exe. Выполняет оригинальный x86-код, гоняет те же входы через `h4-rules`, сохраняет расхождения. Проверены глобальный и боевой RNG, коэффициент урона, броски, полная цепочка модификаторов и финализация со способностью 0x42: 2945 запросов, 0 расхождений. Численная цепочка атаки также сверена; полная команда поля боя и система допустимости заклинаний ещё не реализованы.
-5. **Расхождение → тест.** Каждое найденное отличие оформляется как минимальный сценарий (входные данные, зерно случайности, действия, ожидаемый результат из оригинала) и добавляется в обычные тесты — после этого Wine для его проверки уже не нужен.
+1. **Format regression tests in `cargo test`** (started: `h4-formats/tests/game_data.rs`). The checks from the examples were moved into tests that read data from `$H4_DATA` and are skipped if the game isn't there. The repository holds only expected values derived from the data (sizes, frame counts, coordinates, checksums of decoded images), not the resources or images from the game themselves.
+2. **Checking meaning, not just length**: field ranges, coordinates within their bounds, references to existing resources and animations, consistency of related files (`adv_actor` references existing `actor_sequence`).
+3. **Negative tests**: truncated, corrupted and implausible input gives an error, not a panic or an out-of-bounds read. Synthetic inputs can be built right in the test, without game data. This also covers index checks in sprite and tile rendering.
+4. **Comparison with the exe** is a separate tool, `tools/testbench/compare.py`, not part of the regular build: it requires Unicorn and a supported copy of the exe. It runs the original x86 code, feeds the same inputs through `h4-rules` and saves discrepancies. Verified: the global and combat RNG, the damage coefficient, rolls, the full modifier chain and finalization with ability 0x42: 2945 queries, 0 discrepancies. The numeric attack chain is verified as well; the full battlefield command and the spell eligibility system aren't implemented yet.
+5. **Discrepancy → test.** Every difference found is written up as a minimal scenario (input data, random seed, actions, expected result from the original) and added to the regular tests; after that, checking it no longer needs Wine.
 
-## Диагностика, сборки, устойчивость
+## Diagnostics, builds, robustness
 
-Минимально и без тяжёлой инфраструктуры:
+Minimal, without heavy infrastructure:
 
-- ошибки чтения и загрузки — со структурой (ресурс, смещение, что ожидалось) и через один механизм логирования вместо разрозненных `eprintln!`;
-- диагностика неизвестного: какие ресурсы не разобраны, какие объекты карты и состояния не поддержаны — отчётом, а не падением;
-- простые замеры: время загрузки, кадра, хода ИИ — чтобы замечать деградацию;
-- CI: сборка и тесты без игровых данных на macOS, Windows и Linux; тесты с данными — локально;
-- перед рубежами — ручная проверка запуска с данными игры на каждой из трёх ОС.
+- read and load errors are structured (resource, offset, what was expected) and go through one logging mechanism instead of scattered `eprintln!` calls;
+- diagnostics of the unknown: which resources aren't parsed, which map objects and state aren't supported, as a report rather than a crash;
+- simple measurements: load, frame and AI turn times, to notice regressions;
+- CI: build and tests without game data on macOS, Windows and Linux; tests with data run locally;
+- before milestones: a manual launch check with game data on each of the three OSes.
 
-## Сроки, риски, юридическая сторона
+## Schedule, risks, legal side
 
-Оценка — около трёх лет до полной игры в вечернем темпе, первый играбельный результат (бой) — месяцев через десять. Это ориентир, а не срок: его пересматриваем после первых настоящих `.h4c`, после вертикального среза и когда станет ясен объём ИИ.
+The estimate is about three years to the full game at an evenings-only pace, with the first playable result (combat) in about ten months. This is a guideline, not a deadline: we revise it after the first real `.h4c` files, after the vertical slice, and once the scope of the AI becomes clear.
 
-### Рубежи и версия 1.0
+### Milestones and version 1.0
 
-| Рубеж | Проверяемый результат |
+| Milestone | Verifiable result |
 | --- | --- |
-| 1. Технический прототип | базовые ресурсы читаются и проходят регрессионные тесты; карта отрисовывается; первая настоящая `.h4c` открыта и сверена с оригиналом |
-| 2. Играбельный бой | две армии, основные правила, журнал событий, воспроизводимые тесты с зерном случайности |
-| 3. Одиночная карта | полный игровой цикл на настоящей карте: механика, интерфейс, ИИ, собственные сохранения |
-| 4. Версия 1.0 | заявленный набор карт и кампаний (база и оба дополнения), звук и видео, стабильные сборки для macOS, Windows и Linux |
+| 1. Technical prototype | core resources are read and pass regression tests; the map renders; the first real `.h4c` is opened and verified against the original |
+| 2. Playable combat | two armies, the main rules, an event log, reproducible tests with a random seed |
+| 3. Single map | the full game loop on a real map: mechanics, interface, AI, our own saves |
+| 4. Version 1.0 | the declared set of maps and campaigns (base game and both expansions), sound and video, stable builds for macOS, Windows and Linux |
 
-«Проходится любая одиночная карта» для 1.0 означает: каждая из карт установки загружается, на ней можно сыграть до победы или поражения против ИИ и в хотсите, сохраниться и загрузиться, без ошибок чтения и без падений. Проверка — регрессионный прогон загрузки всех карт плюс ручное прохождение выборки карт разных размеров и дополнений; кампании — прохождение каждой хотя бы раз. Полное ручное прохождение всех 106 карт обязательством не является.
+"Any single map can be played through" for 1.0 means: each installed map loads, can be played to victory or defeat against the AI and in hot-seat, and can be saved and loaded, with no read errors and no crashes. The check is a regression run loading all maps plus a manual playthrough of a sample of maps of different sizes and expansions; for campaigns, each is played through at least once. A full manual playthrough of all 106 maps is not a commitment.
 
-Не входят в 1.0 и не блокируют её: сеть, редактор карт, моды, импорт сохранений оригинала.
+Not part of 1.0 and not blocking it: multiplayer, the map editor, mods, importing saves from the original.
 
-| Этап | Месяцы от старта (оценка) |
+| Stage | Months from start (estimate) |
 | --- | --- |
-| 1. Форматы данных | 0–36, сквозной |
-| 2. Карта: отрисовка | 0–3 |
-| 3. Оригинальные карты `.h4c` | 2–6 → **технический прототип** |
-| Вертикальный срез | около 7, к середине этапа 4 |
-| 4. Бой | 4–10 → **бой человек против человека** |
-| 5. Механика карты | 8–20 |
-| 6. Интерфейс | 6–22 → **карта проходится в хотсите** (20) |
-| 7. ИИ | 14–30 → **игра против ИИ** |
-| 8. Кампании и сохранения | 20–26 |
-| 9. Звук, видео, сеть, полировка | 24–36 → **версия 1.0** |
+| 1. Data formats | 0–36, cross-cutting |
+| 2. Map: rendering | 0–3 |
+| 3. Original `.h4c` maps | 2–6 → **technical prototype** |
+| Vertical slice | around 7, by the middle of stage 4 |
+| 4. Combat | 4–10 → **human-vs-human combat** |
+| 5. Map mechanics | 8–20 |
+| 6. Interface | 6–22 → **a map can be played through in hot-seat** (20) |
+| 7. AI | 14–30 → **playing against the AI** |
+| 8. Campaigns and saves | 20–26 |
+| 9. Sound, video, multiplayer, polish | 24–36 → **version 1.0** |
 
-**Риски:**
+**Risks:**
 
-- **Формат `.h4c`** окажется дольше, чем кажется: одна ошибка сбивает всё после неё. Снижаем редактором карт и минимальными тестовыми картами.
-- **ИИ** — самый непредсказуемый по объёму кусок. Запасной вариант: свой простой ИИ, чтобы игра была играбельной, пока переносим оригинальный.
-- **Имена тира D** в Ghidra бывают неверными (уже дважды попадались). Имя — подсказка, истина — код и проверка на данных.
-- **Выгорание** — главная причина смерти таких проектов. Поэтому каждый шаг даёт видимый результат, а план — не строгий порядок.
+- **The `.h4c` format** may take longer than it seems: one error throws off everything after it. Mitigated by the map editor and minimal test maps.
+- **The AI** is the least predictable piece in terms of scope. Fallback: a simple AI of our own, so the game is playable while the original is being ported.
+- **Tier D names** in Ghidra are sometimes wrong (this has come up twice already). A name is a hint; the truth is the code and a check against data.
+- **Burnout** is the main cause of death for projects like this. So every step gives a visible result, and the plan isn't a strict order.
 
-**Юридическая сторона.** Ориентир — схема VCMI, fheroes2 и OpenMW: свой код под открытой лицензией, данные игрок берёт из своей копии. Примеры этих проектов — ориентир, а не доказательство того, что такой подход безопасен для нашего проекта: допустимость зависит от законодательства и обстоятельств, и юридической оценки у нас нет.
+**Legal side.** The reference is the VCMI, fheroes2 and OpenMW model: our own code under an open license, with players taking the data from their own copy. These projects are a reference, not proof that the approach is safe for ours: what's allowed depends on the law and the circumstances, and we have no legal assessment.
 
-Меры предосторожности:
+Precautions:
 
-- в публичный репозиторий не попадают ресурсы игры, её бинарники, декомпилят и всё, что взято из слитого мапа (`extracted/`, `bin/`, `ghidra/`, `decomp/*.c`, `third_party/`); имена из мапа используем для понимания, в своём коде называем вещи по-своему;
-- происхождение технических выводов документируем (`CLAUDE.md`, `decomp/*.md`, `FORMATS.md`): откуда известен формат или формула;
-- лицензия собственного кода и документации выбрана 31 октября 2026: GPL-3.0-or-later (`LICENSE`, `LICENSING.md`); проверка зависимостей зафиксирована в `THIRD_PARTY.md`;
-- до публикации отдельно решить: правила для чужих вкладов, распространение готовых сборок, использование названия «Heroes of Might and Magic» и товарных знаков.
+- the public repository doesn't get game resources, its binaries, decompiled code or anything taken from the leaked map file (`extracted/`, `bin/`, `ghidra/`, `decomp/*.c`, `third_party/`); names from the map file are used for understanding, and in our own code things get our own names;
+- the origin of technical findings is documented (`CLAUDE.md`, `decomp/*.md`, `FORMATS.md`): how a format or formula is known;
+- the license for our own code and documentation was chosen on 31 October 2026: GPL-3.0-or-later (`LICENSE`, `LICENSING.md`); the dependency check is recorded in `THIRD_PARTY.md`;
+- before publication, separately decide: rules for outside contributions, distribution of ready-made builds, use of the name "Heroes of Might and Magic" and the trademarks.
 
-## Ближайшие шаги
+## Next steps
 
-Настоящие карты, модель состояния, вертикальный срез и минимальный стенд уже есть. Следующий рубеж — управляемый бой: разобрать поле боя и поставить две армии, затем реализовать движение и ближнюю атаку с ответом. Косметические улучшения карты остаются вне критического пути.
+Real maps, the state model, the vertical slice and the minimal testbench already exist. The next milestone is playable combat: work out the battlefield and place two armies, then implement movement and melee attack with retaliation. Cosmetic map improvements stay off the critical path.
 
-**Выполнено дополнительно к игровому прототипу (31 октября):**
+**Done in addition to the game prototype (31 October):**
 
-- [x] `combat_actor` v5/v6: 158 ресурсов, проверки ссылок и декодирования, просмотрщик `--combat`; производные анимации пока не реализованы
-- [x] CI для macOS, Linux и Windows: сборка всех целей и тесты без игровых данных
-- [x] Английский и русский README, таблица статуса, снимки карты и бейдж CI
-- [x] GPL-3.0-or-later, `LICENSING.md`, проверка зависимостей в `THIRD_PARTY.md`
-- [x] Убраны из истории отслеживаемый декомпилят и Finder-метаданные; локальные пути вынесены в игнорируемый `CLAUDE.local.md`
+- [x] `combat_actor` v5/v6: 158 resources, reference and decoding checks, the `--combat` viewer; derived animations aren't implemented yet
+- [x] CI for macOS, Linux and Windows: build of all targets and tests without game data
+- [x] English and Russian READMEs, status table, map screenshots and a CI badge
+- [x] GPL-3.0-or-later, `LICENSING.md`, dependency check in `THIRD_PARTY.md`
+- [x] Removed tracked decompiled code and Finder metadata from history; local paths moved to the ignored `CLAUDE.local.md`
 
-**P0 — критический путь**
+**P0 — critical path**
 
-- [ ] Сделать в оригинале скриншоты для сверки (ты): есть запись героя на ходу и старты «Земли наших пращуров»; нужны берег, стык травы и снега
-- [x] Разобрать `adv_object` и поставить на тестовую карту деревья, горы и пару построек
-- [x] Завести регрессионные тесты для уже разобранных форматов (перенести проверки из примеров в `cargo test`, добавить негативные)
-- [x] Формат `.h4c`: все 106 карт читаются подряд (заголовок, события и скрипты, объекты, тайлы, высоты); в `h4-game` настоящая карта с землёй по сохранённым переходам, объектами и армиями
+- [ ] Take reference screenshots in the original (project owner): we have a recording of a walking hero and the starts of «Земли наших пращуров» ("Lands of Our Forefathers"); still needed: coast, grass/snow boundary
+- [x] Parse `adv_object` and put trees, mountains and a couple of buildings on the test map
+- [x] Set up regression tests for the formats already parsed (move checks from examples into `cargo test`, add negative ones)
+- [x] The `.h4c` format: all 106 maps read sequentially (header, events and scripts, objects, tiles, heights); `h4-game` shows a real map with terrain from stored transitions, objects and armies
 
-**P1 — после первого результата по `.h4c`**
+**P1 — after the first `.h4c` result**
 
-- [x] Завести крейт `h4-rules` и перенести туда формулу урона с тестами (плюс генераторы случайных чисел оригинала, `decomp/random.md`)
-- [x] Минимальный воспроизводимый стенд сравнения с exe: `tools/testbench/compare.py` + Rust-пример `exe_reference`, оригинальный x86-код в Unicorn; SHA-256 сборки, фиксированный корпус, JSON-отчёт, ненулевой выход при расхождении
-- [x] Сверить глобальный RNG, коэффициент атаки/защиты и финализацию урона без способности 0x42: 472 запроса, 0 расхождений; исправлена точность промежуточного вычисления коэффициента (x87), добавлен регрессионный тест
-- [x] Расширить стенд на боевой RNG (16 последовательностей) и броски урона (48 последовательностей): конструктор, счётчики, кэш, сброс зерна, порог 10 существ и потребление бросков; 536 запросов всего, 0 расхождений
-- [x] Сохранить 64 вектора ответов exe в обычных Rust-тестах без игровых данных; воспроизвести найденную особенность кэша RNG при модуле 1
-- [x] Сверить полную цепочку `modify_damage`: 1321 случай разгона, бонусов против крупных целей, удачи, атаки/защиты, оберегов и сопротивлений; оригинальная CRT-настройка x87, исправлено преждевременное округление коэффициента, ответы exe сохранены в тестах; общий стенд — 1857 запросов, 0 расхождений
-- [x] Разобрать и сверить арифметику способности 0x42 при финализации: 912 случаев; бонус от HP существа цели, порог, исключения, ограничение HP и block; допустимость эффекта 0x98 и эффективность — явные входы от будущих правил заклинаний
-- [x] Сверить численную цепочку атаки: броски → модификаторы → финализация на общем состоянии фикстуры; 176 последовательностей по три удара и следующий RNG, melee/ranged, 0x42 и остальные модификаторы; `attack_hit` используется боем-заглушкой
-- [x] Восстановить функцию эффективности `1f1de0`: флаги сопротивления, стороны, способности 0x52/0x1f, выбор общего сопротивления; 320 случаев exe, 0 расхождений, векторы в CI. Допустимость и величины сопротивления остаются входами
-- [x] Перенести фильтры иммунитетов `1b3540`/`1b3a10`, ветку 0x98 в `1b4770` и запрет при сопротивлении ≥100 (`1b5750`): 7088 сценариев, 0 расхождений, ответы exe в CI. Флаги эффекта, способности/эффекты и виртуальное сопротивление — входы; это пока отдельные фильтры, не полная допустимость
-- [x] Собрать `Ability42Target` через `StoneGazeContext`: общий контекст фильтров и эффективности, явный результат остальных проверок (неизвестно → `None`); 896 связных сценариев допустимость → эффективность → финальный урон, сверенных с exe. Заглушка боя по-прежнему не даёт входов заклинаний
-- [ ] Подключить настоящие правила допустимости эффекта 0x98, иммунитетов и разрешения сопротивления; это не подменяется численной сверкой
-- [ ] Полная команда атаки поля боя: выбор удачи, штрафы стрельбы, применение потерь, эффекты и ответ
-- [x] Минимальная модель состояния: крейт `h4-state` (игроки, день, карта с проходимостью, объекты, армии), сборка из `.h4c` — `h4_rules::new_game`, тест на всех 106 картах
-- [x] Ход армии по правилам exe (`h4_rules::movement`, `decomp/movement.md`): стоимость шага, очки движения, поиск пути, остановка у врага
-- [x] Заглушка боя (`h4_rules::battle`): урон и кости как в игре, остальное упрощено; итог (потери, опыт, исчезнувшая армия) пишется в состояние, сквозной тест «дошёл — напал — победил»
-- [x] Конец хода и новый день (`h4_rules::turns`, `decomp/turns.md`): очерёдность игроков, движение заново, ежедневный рост нейтральных монстров
-- [x] Вертикальный срез: `h4-game` играет на `GameState` через `h4_rules` (ход → нападение → бой-заглушка → итог → конец хода, хотсит) на тестовой и настоящих картах; проверка без человека — `H4_ORDERS` + `H4_SCREENSHOT`
-- [x] Раскрыть случайные объекты при старте карты: города, монстры, жилища, кучи, генераторы, шрайны, храмы — по правилам exe (`decomp/placement.md`)
-- [x] Случайные артефакты, зелья, томы, посохи (`h4_rules::artifacts`)
-- [x] Случайные учителя (`t_random_altar`)
-- [ ] Заклинание шрайна; уровень города по постройкам (функция уровня в exe пока не найдена; у настоящих городов модель в файле почти всегда fort, по данным не проверить)
-- [x] Герои на карте своей моделью по классу и полу (`h4_rules::heroes`)
-- [x] Случайные герои: класс и пол как в `t_hero::derandomize`
-- [x] Число существ «случайное» (0 в файле): `t_creature::read` → `7f4500`
-- [ ] Герои в тюрьмах, направления армий
-- [ ] Можно ли напасть, когда очки движения кончились: сейчас `move_army` проверяет врага раньше очков, и нападение на соседа проходит с нулём — сверить с exe
+- [x] Create the `h4-rules` crate and move the damage formula there with tests (plus the original's random number generators, `decomp/random.md`)
+- [x] Minimal reproducible testbench for comparing with the exe: `tools/testbench/compare.py` + the Rust example `exe_reference`, original x86 code in Unicorn; build SHA-256, fixed corpus, JSON report, non-zero exit on discrepancy
+- [x] Verify the global RNG, the attack/defense coefficient and damage finalization without ability 0x42: 472 queries, 0 discrepancies; fixed the precision of the intermediate coefficient calculation (x87), added a regression test
+- [x] Extend the testbench to the combat RNG (16 sequences) and damage rolls (48 sequences): constructor, counters, cache, seed reset, the 10-creature threshold and roll consumption; 536 queries in total, 0 discrepancies
+- [x] Save 64 exe answer vectors in regular Rust tests without game data; reproduce the RNG cache quirk found with modulus 1
+- [x] Verify the full `modify_damage` chain: 1321 cases of charge, bonuses against large targets, luck, attack/defense, wards and resistances; the original CRT x87 setup, fixed premature rounding of the coefficient, exe answers saved in tests; the shared testbench is at 1857 queries, 0 discrepancies
+- [x] Work out and verify the arithmetic of ability 0x42 at finalization: 912 cases; the bonus from target creature HP, the threshold, exceptions, the HP limit and block; eligibility of effect 0x98 and effectiveness are explicit inputs from future spell rules
+- [x] Verify the numeric attack chain: rolls → modifiers → finalization on shared fixture state; 176 sequences of three hits and the next RNG value, melee/ranged, 0x42 and the other modifiers; `attack_hit` is used by the battle stub
+- [x] Restore the effectiveness function `1f1de0`: resistance flags, sides, abilities 0x52/0x1f, general resistance selection; 320 exe cases, 0 discrepancies, vectors in CI. Eligibility and resistance values remain inputs
+- [x] Port the immunity filters `1b3540`/`1b3a10`, the 0x98 branch in `1b4770` and the ban at resistance ≥100 (`1b5750`): 7088 scenarios, 0 discrepancies, exe answers in CI. Effect flags, abilities/effects and virtual resistance are inputs; these are separate filters for now, not full eligibility
+- [x] Build `Ability42Target` through `StoneGazeContext`: a shared context for filters and effectiveness, an explicit result of the other checks (unknown → `None`); 896 connected eligibility → effectiveness → final damage scenarios verified against the exe. The battle stub still provides no spell inputs
+- [ ] Connect the real rules for effect 0x98 eligibility, immunities and resistance resolution; numeric verification doesn't substitute for this
+- [ ] Full battlefield attack command: luck roll, shooting penalties, applying losses, effects and retaliation
+- [x] Minimal state model: the `h4-state` crate (players, day, map with passability, objects, armies), built from `.h4c` by `h4_rules::new_game`, tested on all 106 maps
+- [x] Army movement by the exe's rules (`h4_rules::movement`, `decomp/movement.md`): step cost, movement points, pathfinding, stopping at an enemy
+- [x] Battle stub (`h4_rules::battle`): damage and dice as in the game, the rest simplified; the outcome (losses, experience, the army gone) is written to the state, with an end-to-end "walked, attacked, won" test
+- [x] End of turn and new day (`h4_rules::turns`, `decomp/turns.md`): player order, movement refresh, daily growth of neutral monsters
+- [x] Vertical slice: `h4-game` plays on `GameState` through `h4_rules` (move → attack → battle stub → outcome → end of turn, hot-seat) on the test map and real maps; checks without a human via `H4_ORDERS` + `H4_SCREENSHOT`
+- [x] Resolve random objects at map start: towns, monsters, dwellings, piles, generators, shrines, temples by the exe's rules (`decomp/placement.md`)
+- [x] Random artifacts, potions, tomes, staffs (`h4_rules::artifacts`)
+- [x] Random teachers (`t_random_altar`)
+- [ ] Shrine spell; town level from buildings (the level function hasn't been found in the exe yet; real towns almost always have the fort model in the file, so this can't be checked from data)
+- [x] Heroes on the map with their own model by class and gender (`h4_rules::heroes`)
+- [x] Random heroes: class and gender as in `t_hero::derandomize`
+- [x] "Random" creature count (0 in the file): `t_creature::read` → `7f4500`
+- [ ] Heroes in prisons, army facing
+- [ ] Can you attack when out of movement points: `move_army` currently checks for an enemy before checking points, so attacking a neighbor works with zero; verify against the exe
 
-**P2 — улучшения прототипа**
+**P2 — prototype improvements**
 
-- [x] Маски дорог и переходы на настоящих картах — берутся из самой карты (`decomp/terrain_draw.md`)
-- [x] Края дорог на сгенерированной карте — как их кладёт редактор (правило выведено из переходов во всех 106 картах; `road_cut_code`/`road_edge_code`)
-- [ ] Декомпилировать `transition_calculator` и поправить выбор масок земли на сгенерированной карте (мелководье)
-- [x] Смещения метатайлов как в игре: мозаика блоков 4×4 из `terrain_seed` заголовка (`t_metatile_map`, rva `395400`; `h4-game/src/mosaic.rs`) — с оригиналом визуально ещё не сверено
-- [ ] Сверить с игрой: проходимость рек, сортировку героя по глубине столбцов объектов; что игра делает с пустыми армиями карт (108 шт., напр. «Three Queens» (39,29)) и с армиями на объектах («Final Grounds», скелеты)
-- [x] Затенение земли по высотам — по формуле exe (`decomp/heights.md`, `shade_by_height`); растяжка света по тайлу — наша догадка (линейно по двум треугольникам); со стартами «Земли наших пращуров» сверено на глаз
-- [x] Подъём земли по высотам, объектов и армий (`decomp/heights.md`, `h4-game/src/relief.rs`); высоты карты — только земля. Сверено на глаз со стартами «Земли наших пращуров». Осталось: мосты («высота моста»), флаг клеток в `compute_height`, сверить с игрой подъём героя при ходьбе и учитывает ли порядок отрисовки высоту
-- [ ] Некоторые ели на «Beebee» (у бочки-домика у старта) рисуются полупрозрачными — сверить с игрой
-- [ ] Выбор, кто играет каким цветом, при старте карты (сейчас каждый playable-цвет — человек, остальные пропускают ход)
-- [ ] Музыка и звуки шагов в прототипе — дёшево, а оживляет сильно; если не тормозит критический путь
+- [x] Road masks and transitions on real maps are taken from the map itself (`decomp/terrain_draw.md`)
+- [x] Road edges on the generated map as the editor lays them (rule derived from the transitions in all 106 maps; `road_cut_code`/`road_edge_code`)
+- [ ] Decompile `transition_calculator` and fix terrain mask selection on the generated map (shallows)
+- [x] Metatile offsets as in the game: 4×4 block mosaic from the header's `terrain_seed` (`t_metatile_map`, rva `395400`; `h4-game/src/mosaic.rs`); not yet compared visually with the original
+- [ ] Verify against the game: river passability, hero sorting against object depth columns; what the game does with empty map armies (108 of them, e.g. "Three Queens" (39,29)) and armies on objects ("Final Grounds", skeletons)
+- [x] Terrain shading from heights by the exe's formula (`decomp/heights.md`, `shade_by_height`); stretching the light across a tile is our guess (linear over two triangles); compared by eye with the starts of «Земли наших пращуров»
+- [x] Elevation of terrain, objects and armies from heights (`decomp/heights.md`, `h4-game/src/relief.rs`); map heights are terrain only. Compared by eye with the starts of «Земли наших пращуров». Remaining: bridges ("bridge height"), the tile flag in `compute_height`, verifying against the game how a hero rises while walking and whether the draw order accounts for height
+- [ ] Some spruces on "Beebee" (near the barrel house at the start) are drawn semi-transparent; verify against the game
+- [ ] Choosing who plays which color at map start (currently every playable color is a human and the rest skip their turn)
+- [ ] Music and footstep sounds in the prototype: cheap and brings it to life, if it doesn't slow the critical path
