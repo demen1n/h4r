@@ -257,3 +257,13 @@ selection/comparison, morale classification/RNG and stance arithmetic. Includes
 wait/defend flags, stance expiry and last-side updates. Virtual stats, abilities
 and effects are fixture inputs; UI and the full action pipeline are excluded.
 See `decomp/initiative.md` and `cargo test -p h4-rules --test initiative`.
+
+Applying damage to a stack (#68):
+`apply_damage.py --exe bin/heroes4.exe --out PATH` records 1,800 fixtures: native
+`resolve_damage` (RVA `1eee40`) and `kill` (RVA `1f3860`) executed whole, and the
+pending-damage cap block of `add_damage` (`1f2a91..1f2ab8`). Number, wounds, pending
+damage, hit points, the permanent flag/counter and total hits are fixture inputs.
+Effects are absent; text formatting, the floating damage text (arguments recorded),
+label refresh and `clear_influence` are stubbed. Poison, spell shields, luck, the
+martyr redirect and the death sequence are excluded.
+See `decomp/apply_damage.md` and `cargo test -p h4-rules --test apply_damage_vectors`.

@@ -403,11 +403,10 @@ fn invalid_actions_and_inputs_are_atomic_and_dead_stacks_are_skipped() {
     let before = battle.clone();
     assert!(battle.begin_initiative_round(&stats).is_err());
     assert_eq!(battle, before);
-    // Damage commands arrive in #68. Simulate one casualty through a valid fixture.
-    let mut value: serde_json::Value = serde_json::from_str(&battle.to_json().unwrap()).unwrap();
-    value["units"][0]["kind"]["Creature"]["count"] = serde_json::json!(0);
-    value["units"][0]["kind"]["Creature"]["top_hp"] = serde_json::json!(0);
-    let mut dead = BattleState::from_json(&value.to_string()).unwrap();
+    // One casualty before anybody moved.
+    let first = battle.units()[0].id;
+    battle.kill(first, i32::MAX).unwrap();
+    let mut dead = BattleState::from_json(&battle.to_json().unwrap()).unwrap();
     let next = dead.begin_next_turn().unwrap().unwrap();
     assert_ne!(next, dead.units()[0].id);
     assert!(matches!(

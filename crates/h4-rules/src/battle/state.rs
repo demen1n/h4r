@@ -2,7 +2,8 @@
 //!
 //! This is the foundation for #53, not a new combat resolver. The caller supplies
 //! the field and effective combat stats; `deploy_initial` supplies recovered
-//! deployment (#57), `begin_initiative_round` schedules turns/wait/defense (#60).
+//! deployment (#57), `begin_initiative_round` schedules turns/wait/defense (#60),
+//! `add_damage`/`apply_damage` turn damage into losses (#68).
 //! The old `battle::fight` remains the map's stand-in until #75. Heroes retain their identity, with combat stats left for #71.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -14,13 +15,14 @@ use serde::{Deserialize, Serialize};
 use super::initiative::{
     defending_defense, morale_result, InitiativeStats, RoundInitiative, UnitInitiative,
 };
+use super::wounds;
 use super::Side;
 use crate::battlefield::{BattlefieldGrid, CellOccupant, CombatFootprint, PlacedObstacle};
 use crate::creatures::CreatureStats;
 use crate::random::CombatRandom;
 
 /// Version of our JSON fixture, not the original game's saved-battle format.
-pub const SNAPSHOT_VERSION: u32 = 2;
+pub const SNAPSHOT_VERSION: u32 = 3;
 
 /// Stable within one battle. Also the occupant ID in the collision grid and the
 /// ID passed to combat dice. IDs are never vector indices or adventure army IDs.
@@ -51,7 +53,16 @@ pub enum UnitKind {
         stats: CreatureStats,
         initial_count: i32,
         count: i32,
-        top_hp: i32,
+        /// Damage the top creature has taken; the others are unhurt. This is
+        /// how the exe keeps it (there is no "top creature hit points" field).
+        wounds: i32,
+        /// Damage accepted by `add_damage` and not yet turned into wounds.
+        pending_damage: i32,
+        /// Whether the pending damage kills for good (the flag of the latest
+        /// `add_damage`). Who sets it in the game is not recovered yet.
+        pending_permanent: bool,
+        /// Creatures that died from damage flagged as permanent.
+        permanent_deaths: i32,
         shots: i32,
     },
     /// No invented HP or combat stats. Heroes are participants, including in
@@ -74,6 +85,30 @@ impl BattleUnit {
         match &self.kind {
             UnitKind::Creature { count, .. } => *count > 0,
             UnitKind::Hero(_) => true,
+        }
+    }
+
+    /// Hit points the whole stack has left, pending damage not counted.
+    /// `None` for heroes: their combat hit points are not recovered yet (#71).
+    pub fn total_hits(&self) -> Option<i32> {
+        match &self.kind {
+            UnitKind::Creature {
+                stats,
+                count,
+                wounds,
+                ..
+            } => wounds::total_hits(*count, *wounds, stats.hit_points).ok(),
+            UnitKind::Hero(_) => None,
+        }
+    }
+
+    /// Hit points of the top creature: what the player sees as its health.
+    /// 0 for a dead stack, `None` for heroes.
+    pub fn top_hit_points(&self) -> Option<i32> {
+        match &self.kind {
+            UnitKind::Creature { count: 0, .. } => Some(0),
+            UnitKind::Creature { stats, wounds, .. } => Some(stats.hit_points - wounds),
+            UnitKind::Hero(_) => None,
         }
     }
 }
@@ -127,6 +162,44 @@ pub enum CombatEvent {
         purpose: u32,
         value: u32,
     },
+    /// `add_damage`: `accepted` of the `damage` asked for became pending.
+    DamageAdded {
+        unit: UnitId,
+        damage: i32,
+        accepted: i32,
+        permanent: bool,
+    },
+    /// `apply_damage`: pending `damage` became wounds; the stack is left with
+    /// `count` creatures and `wounds` on the top one.
+    DamageApplied {
+        unit: UnitId,
+        damage: i32,
+        killed: i32,
+        count: i32,
+        wounds: i32,
+    },
+    /// `kill`: creatures removed outright, without damage.
+    Killed {
+        unit: UnitId,
+        killed: i32,
+        count: i32,
+    },
+    /// The stack lost its last creature. Its body stays where it fell.
+    Died {
+        unit: UnitId,
+    },
+}
+
+/// What `apply_damage` or `kill` did to a stack.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Losses {
+    /// Damage that was turned into wounds (0 for `kill`).
+    pub damage: i32,
+    pub killed: i32,
+    /// Creatures left.
+    pub count: i32,
+    /// Whether this step killed the stack.
+    pub died: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -166,7 +239,14 @@ fn occupied_ids(field: &BattlefieldGrid) -> BTreeSet<u32> {
     ids
 }
 
-fn unit_obstacle(id: UnitId, position: UnitPosition) -> Result<PlacedObstacle, String> {
+/// A unit as an object on the collision grid. A living unit blocks its cells;
+/// the body of a dead one stays on the field but blocks nothing, like in the
+/// exe (`t_combat_creature::blocks_movement`, rva `1ef5a0`: number > 0).
+fn unit_obstacle(
+    id: UnitId,
+    position: UnitPosition,
+    blocks: bool,
+) -> Result<PlacedObstacle, String> {
     if position.size == 0 {
         return Err("battle units need a nonzero model footprint size".into());
     }
@@ -177,7 +257,7 @@ fn unit_obstacle(id: UnitId, position: UnitPosition) -> Result<PlacedObstacle, S
         },
         occupant: CellOccupant {
             id: id.0,
-            blocks: true,
+            blocks,
             skip_blocking: false,
         },
     })
@@ -187,8 +267,9 @@ fn place_unit(
     field: &mut BattlefieldGrid,
     id: UnitId,
     position: UnitPosition,
+    blocks: bool,
 ) -> Result<(), String> {
-    let obstacle = unit_obstacle(id, position)?;
+    let obstacle = unit_obstacle(id, position, blocks)?;
     for (dx, dy) in obstacle.footprint.cells() {
         let x = position
             .at
@@ -248,7 +329,10 @@ impl BattleState {
                             .clone();
                         UnitKind::Creature {
                             creature: stack.creature,
-                            top_hp: stats.hit_points,
+                            wounds: 0,
+                            pending_damage: 0,
+                            pending_permanent: false,
+                            permanent_deaths: 0,
                             shots: stats.shots,
                             stats,
                             initial_count: stack.count,
@@ -326,7 +410,7 @@ impl BattleState {
     }
 
     pub(crate) fn can_deploy(&self, id: UnitId, position: UnitPosition) -> bool {
-        let Ok(obstacle) = unit_obstacle(id, position) else {
+        let Ok(obstacle) = unit_obstacle(id, position, true) else {
             return false;
         };
         obstacle.footprint.cells().all(|(dx, dy)| {
@@ -351,7 +435,7 @@ impl BattleState {
             .ok_or("unknown battle unit")?;
         let mut field = self.data.field.clone();
         field.remove_object(id.0);
-        place_unit(&mut field, id, position)?;
+        place_unit(&mut field, id, position, self.data.units[index].alive())?;
         self.data.field = field;
         self.data.units[index].position = Some(position);
         self.data
@@ -588,6 +672,180 @@ impl BattleState {
         Ok(unit)
     }
 
+    /// A hit of `damage` on `target` (`t_combat_creature::add_damage`, rva
+    /// `1f2800`). The damage only becomes *pending*: nobody dies until
+    /// `apply_damage`. Several hits may pile up first, but never more than the
+    /// stack has left, so the returned accepted damage can be less than asked.
+    /// `permanent` marks the kills of this damage as permanent deaths.
+    ///
+    /// Not here yet: the target's luck roll, the martyr redirect, spell shields
+    /// and "ignore the next hit" effects that the exe checks in this function.
+    pub fn add_damage(
+        &mut self,
+        target: UnitId,
+        damage: i32,
+        permanent: bool,
+    ) -> Result<i32, String> {
+        let unit = self
+            .data
+            .units
+            .iter_mut()
+            .find(|u| u.id == target)
+            .ok_or("unknown battle unit")?;
+        let UnitKind::Creature {
+            stats,
+            count,
+            wounds,
+            pending_damage,
+            pending_permanent,
+            ..
+        } = &mut unit.kind
+        else {
+            return Err("damage to heroes needs their combat stats (#71)".into());
+        };
+        // The exe ignores a hit below 1 before it touches anything.
+        if damage < 1 {
+            return Ok(0);
+        }
+        let total = wounds::total_hits(*count, *wounds, stats.hit_points)?;
+        let accepted = wounds::accept_damage(damage, *pending_damage, total)?;
+        *pending_damage += accepted;
+        *pending_permanent = permanent;
+        self.data.events.push(CombatEvent::DamageAdded {
+            unit: target,
+            damage,
+            accepted,
+            permanent,
+        });
+        Ok(accepted)
+    }
+
+    /// Turn the pending damage of `target` into wounds and losses
+    /// (`t_combat_creature::apply_damage`, rva `1ef2d0`, and `resolve_damage`,
+    /// rva `1eee40`). Without pending damage nothing happens and nothing is
+    /// logged. A stack that loses its last creature dies: see [`Self::kill`].
+    pub fn apply_damage(&mut self, target: UnitId) -> Result<Losses, String> {
+        let unit = self
+            .data
+            .units
+            .iter_mut()
+            .find(|u| u.id == target)
+            .ok_or("unknown battle unit")?;
+        let UnitKind::Creature {
+            stats,
+            count,
+            wounds,
+            pending_damage,
+            pending_permanent,
+            permanent_deaths,
+            ..
+        } = &mut unit.kind
+        else {
+            return Err("damage to heroes needs their combat stats (#71)".into());
+        };
+        let damage = *pending_damage;
+        if damage == 0 {
+            return Ok(Losses {
+                damage: 0,
+                killed: 0,
+                count: *count,
+                died: false,
+            });
+        }
+        let resolved = wounds::resolve_damage(*count, *wounds, damage, stats.hit_points)?;
+        *count = resolved.count;
+        *wounds = resolved.wounds;
+        if *pending_permanent {
+            *permanent_deaths += resolved.killed;
+        }
+        *pending_damage = 0;
+        *pending_permanent = false;
+        self.data.events.push(CombatEvent::DamageApplied {
+            unit: target,
+            damage,
+            killed: resolved.killed,
+            count: resolved.count,
+            wounds: resolved.wounds,
+        });
+        let died = resolved.killed > 0 && resolved.count == 0;
+        if died {
+            self.unit_died(target)?;
+        }
+        Ok(Losses {
+            damage,
+            killed: resolved.killed,
+            count: resolved.count,
+            died,
+        })
+    }
+
+    /// Remove `number` creatures of `target` outright, without damage
+    /// (`t_combat_creature::kill`, rva `1f3860`); the survivors keep the top
+    /// creature's wounds. Pending damage that no longer fits is dropped.
+    ///
+    /// When a stack dies (here or in `apply_damage`) its body stays on its
+    /// cells but stops blocking them, and if it was the active unit its turn
+    /// ends. Death animations, effects ending with the stack and abilities that
+    /// react to a death are not part of this.
+    pub fn kill(&mut self, target: UnitId, number: i32) -> Result<Losses, String> {
+        if number < 0 {
+            return Err("cannot kill a negative number of creatures".into());
+        }
+        let unit = self
+            .data
+            .units
+            .iter_mut()
+            .find(|u| u.id == target)
+            .ok_or("unknown battle unit")?;
+        let UnitKind::Creature {
+            stats,
+            count,
+            wounds,
+            pending_damage,
+            ..
+        } = &mut unit.kind
+        else {
+            return Err("killing heroes needs their combat rules (#71)".into());
+        };
+        let before = *count;
+        let resolved = wounds::kill(*count, *wounds, number);
+        *count = resolved.count;
+        *wounds = resolved.wounds;
+        // Our own bookkeeping, not the exe's: keep "pending <= hit points left".
+        let total = wounds::total_hits(*count, *wounds, stats.hit_points)?;
+        *pending_damage = (*pending_damage).min(total);
+        self.data.events.push(CombatEvent::Killed {
+            unit: target,
+            killed: resolved.killed,
+            count: resolved.count,
+        });
+        let died = before > 0 && resolved.count == 0;
+        if died {
+            self.unit_died(target)?;
+        }
+        Ok(Losses {
+            damage: 0,
+            killed: resolved.killed,
+            count: resolved.count,
+            died,
+        })
+    }
+
+    /// Bookkeeping for a stack that just lost its last creature.
+    fn unit_died(&mut self, id: UnitId) -> Result<(), String> {
+        let position = self.unit(id).ok_or("unknown battle unit")?.position;
+        if let Some(position) = position {
+            // The same cells, now as a body that blocks nothing.
+            self.data.field.remove_object(id.0);
+            place_unit(&mut self.data.field, id, position, false)?;
+        }
+        self.data.events.push(CombatEvent::Died { unit: id });
+        if self.data.turns.active == Some(id) {
+            self.finish_turn()?;
+        }
+        Ok(())
+    }
+
     /// Dice and their observable counters belong to the battle. Record each
     /// result so the same action stream can be compared after fixture reload.
     /// This is the only way the battle's generator is used, which is why
@@ -653,7 +911,9 @@ impl BattleState {
                 stats,
                 initial_count,
                 count,
-                top_hp,
+                wounds,
+                pending_damage,
+                permanent_deaths,
                 shots,
                 ..
             } = &unit.kind
@@ -665,10 +925,18 @@ impl BattleState {
                     || stats.shots < 0
                     || *shots < 0
                     || *shots > stats.shots
-                    || (*count == 0 && *top_hp != 0)
-                    || (*count > 0 && (*top_hp < 1 || *top_hp > stats.hit_points))
+                    || *wounds < 0
+                    || (*count == 0 && *wounds != 0)
+                    || (*count > 0 && *wounds >= stats.hit_points)
+                    || *permanent_deaths < 0
+                    || *permanent_deaths > initial_count - count
                 {
-                    return Err("invalid creature count, HP or shots".into());
+                    return Err("invalid creature count, wounds or shots".into());
+                }
+                // `add_damage` never lets pending damage exceed what is left.
+                let total = wounds::total_hits(*count, *wounds, stats.hit_points)?;
+                if *pending_damage < 0 || *pending_damage > total {
+                    return Err("invalid pending damage".into());
                 }
             }
         }
@@ -706,10 +974,13 @@ impl BattleState {
                         return Err("inconsistent or duplicate field occupant".into());
                     }
                     let id = UnitId(occupant.id);
-                    if ids.contains(&id) {
+                    if let Some(unit) = data.units.iter().find(|u| u.id == id) {
+                        // The living block their cells and stand on free ones;
+                        // a body blocks nothing and others may stand over it.
+                        let alive = unit.alive();
                         if occupant.skip_blocking
-                            || !occupant.blocks
-                            || data.field.is_blocked(x as i32, y as i32, Some(id.0))
+                            || occupant.blocks != alive
+                            || (alive && data.field.is_blocked(x as i32, y as i32, Some(id.0)))
                         {
                             return Err("battle unit occupies a blocked cell".into());
                         }
@@ -724,7 +995,7 @@ impl BattleState {
         for unit in &data.units {
             let expected = match unit.position {
                 Some(position) => {
-                    let obstacle = unit_obstacle(unit.id, position)?;
+                    let obstacle = unit_obstacle(unit.id, position, unit.alive())?;
                     obstacle
                         .footprint
                         .cells()
@@ -925,7 +1196,11 @@ impl BattleState {
                 | CombatEvent::TurnFinished { unit }
                 | CombatEvent::Waited { unit }
                 | CombatEvent::Defended { unit }
-                | CombatEvent::TurnSpeedChanged { unit, .. } => ids.contains(unit),
+                | CombatEvent::TurnSpeedChanged { unit, .. }
+                | CombatEvent::DamageAdded { unit, .. }
+                | CombatEvent::DamageApplied { unit, .. }
+                | CombatEvent::Killed { unit, .. }
+                | CombatEvent::Died { unit } => ids.contains(unit),
                 CombatEvent::RoundStarted { order, .. } => order.iter().all(|id| ids.contains(id)),
                 CombatEvent::InitiativeStarted { state } => {
                     state.entries.iter().all(|entry| ids.contains(&entry.unit))
