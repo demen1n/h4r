@@ -107,7 +107,8 @@ fn creation_owns_sparse_armies_heroes_field_and_stats() {
         state.units()[0].kind,
         UnitKind::Creature {
             count: 12,
-            top_hp: 10,
+            wounds: 0,
+            pending_damage: 0,
             shots: 8,
             ..
         }
@@ -294,7 +295,9 @@ fn snapshots_reject_corrupt_cross_references_geometry_hp_and_rng() {
         ("/armies/0/slots/0", serde_json::json!(999)),
         ("/units/0/id", serde_json::json!(0)),
         ("/units/0/slot", serde_json::json!(7)),
-        ("/units/0/kind/Creature/top_hp", serde_json::json!(11)),
+        ("/units/0/kind/Creature/wounds", serde_json::json!(10)),
+        ("/units/0/kind/Creature/pending_damage", serde_json::json!(121)),
+        ("/units/0/kind/Creature/permanent_deaths", serde_json::json!(1)),
         ("/units/0/kind/Creature/count", serde_json::json!(-1)),
         ("/units/0/position/at", serde_json::json!([1, 1])),
         ("/field/rows/0/start", serde_json::json!(usize::MAX)),
@@ -334,11 +337,11 @@ fn invalid_map_inputs_fail_instead_of_disappearing_from_battle() {
 }
 
 #[test]
-fn wounded_fixture_keeps_top_hp_shots_and_losses_instead_of_reinitializing() {
+fn wounded_fixture_keeps_wounds_shots_and_losses_instead_of_reinitializing() {
     let state = battle();
     let mut value: serde_json::Value = serde_json::from_str(&state.to_json().unwrap()).unwrap();
     value["units"][0]["kind"]["Creature"]["count"] = serde_json::json!(7);
-    value["units"][0]["kind"]["Creature"]["top_hp"] = serde_json::json!(3);
+    value["units"][0]["kind"]["Creature"]["wounds"] = serde_json::json!(7);
     value["units"][0]["kind"]["Creature"]["shots"] = serde_json::json!(2);
     let restored = BattleState::from_json(&value.to_string()).unwrap();
     assert!(matches!(
@@ -346,11 +349,13 @@ fn wounded_fixture_keeps_top_hp_shots_and_losses_instead_of_reinitializing() {
         UnitKind::Creature {
             initial_count: 12,
             count: 7,
-            top_hp: 3,
+            wounds: 7,
             shots: 2,
             ..
         }
     ));
+    assert_eq!(restored.units()[0].top_hit_points(), Some(3));
+    assert_eq!(restored.units()[0].total_hits(), Some(63));
     assert_eq!(
         BattleState::from_json(&restored.to_json().unwrap()).unwrap(),
         restored
@@ -371,10 +376,10 @@ fn units_killed_mid_round_stay_loadable_and_lose_their_turn() {
     let ids = deploy_both(&mut state);
     state.begin_round(&[ids[0], ids[1]]).unwrap();
     assert_eq!(state.begin_next_turn().unwrap(), Some(ids[0]));
-    // No damage rules yet (#68), so kill the waiting unit in the snapshot.
-    let mut value: serde_json::Value = serde_json::from_str(&state.to_json().unwrap()).unwrap();
-    value["units"][1]["kind"]["Creature"]["count"] = serde_json::json!(0);
-    value["units"][1]["kind"]["Creature"]["top_hp"] = serde_json::json!(0);
+    // Kill the unit that is still waiting for its turn.
+    state.add_damage(ids[1], 1000, false).unwrap();
+    assert!(state.apply_damage(ids[1]).unwrap().died);
+    let value: serde_json::Value = serde_json::from_str(&state.to_json().unwrap()).unwrap();
     let mut restored = BattleState::from_json(&value.to_string()).unwrap();
     assert!(!restored.units()[1].alive());
     restored.finish_turn().unwrap();
@@ -388,7 +393,205 @@ fn units_killed_mid_round_stay_loadable_and_lose_their_turn() {
     // A dead unit cannot be the active one, and the living must be queued.
     let mut active_dead = value.clone();
     active_dead["units"][0]["kind"]["Creature"]["count"] = serde_json::json!(0);
-    active_dead["units"][0]["kind"]["Creature"]["top_hp"] = serde_json::json!(0);
     assert!(BattleState::from_json(&active_dead.to_string()).is_err());
     restored.begin_round(&[ids[0]]).unwrap();
+}
+
+// The fixture stack: 12 creatures of 10 hit points, 120 in total.
+
+#[test]
+fn damage_waits_as_pending_then_becomes_wounds_and_losses() {
+    let mut state = battle();
+    let ids = deploy_both(&mut state);
+    let before = state.clone();
+    // nothing below 1 is a hit, and applying nothing changes nothing
+    assert_eq!(state.add_damage(ids[1], 0, false).unwrap(), 0);
+    assert_eq!(state.add_damage(ids[1], -7, false).unwrap(), 0);
+    assert_eq!(state.apply_damage(ids[1]).unwrap().killed, 0);
+    assert_eq!(state, before);
+
+    assert_eq!(state.add_damage(ids[1], 25, false).unwrap(), 25);
+    // still nobody dead: the damage is only pending, and survives a reload
+    assert!(matches!(
+        state.units()[1].kind,
+        UnitKind::Creature {
+            count: 12,
+            wounds: 0,
+            pending_damage: 25,
+            ..
+        }
+    ));
+    let mut state = BattleState::from_json(&state.to_json().unwrap()).unwrap();
+    let losses = state.apply_damage(ids[1]).unwrap();
+    assert_eq!(
+        (losses.damage, losses.killed, losses.count, losses.died),
+        (25, 2, 10, false)
+    );
+    assert_eq!(state.units()[1].top_hit_points(), Some(5));
+    assert_eq!(state.units()[1].total_hits(), Some(95));
+    // the next hit finishes the wounded creature first
+    state.add_damage(ids[1], 5, false).unwrap();
+    assert_eq!(state.apply_damage(ids[1]).unwrap().killed, 1);
+    assert_eq!(state.units()[1].top_hit_points(), Some(10));
+    assert!(matches!(
+        state.events().last(),
+        Some(CombatEvent::DamageApplied {
+            damage: 5,
+            killed: 1,
+            count: 9,
+            wounds: 0,
+            ..
+        })
+    ));
+    assert_eq!(
+        BattleState::from_json(&state.to_json().unwrap()).unwrap(),
+        state
+    );
+}
+
+#[test]
+fn several_hits_cannot_take_more_than_the_stack_has() {
+    let mut state = battle();
+    let ids = deploy_both(&mut state);
+    assert_eq!(state.add_damage(ids[0], 100, true).unwrap(), 100);
+    // only 20 hit points are left to lose; the latest hit decides "permanent"
+    assert_eq!(state.add_damage(ids[0], 100, false).unwrap(), 20);
+    assert_eq!(state.add_damage(ids[0], 1, false).unwrap(), 0);
+    let losses = state.apply_damage(ids[0]).unwrap();
+    assert_eq!((losses.damage, losses.killed, losses.died), (120, 12, true));
+    assert!(matches!(
+        state.units()[0].kind,
+        UnitKind::Creature {
+            count: 0,
+            wounds: 0,
+            pending_damage: 0,
+            permanent_deaths: 0,
+            ..
+        }
+    ));
+    // a dead stack takes no more damage
+    assert_eq!(state.add_damage(ids[0], 50, false).unwrap(), 0);
+    assert_eq!(state.apply_damage(ids[0]).unwrap().killed, 0);
+}
+
+#[test]
+fn permanent_damage_counts_permanent_deaths() {
+    let mut state = battle();
+    let ids = deploy_both(&mut state);
+    state.add_damage(ids[0], 30, true).unwrap();
+    state.apply_damage(ids[0]).unwrap();
+    state.add_damage(ids[0], 20, false).unwrap();
+    state.apply_damage(ids[0]).unwrap();
+    assert!(matches!(
+        state.units()[0].kind,
+        UnitKind::Creature {
+            count: 7,
+            permanent_deaths: 3,
+            pending_permanent: false,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn a_dead_stack_leaves_a_body_that_blocks_nothing_and_ends_its_turn() {
+    let mut state = battle();
+    let ids = deploy_both(&mut state);
+    state.begin_round(&[ids[0], ids[1]]).unwrap();
+    assert_eq!(state.begin_next_turn().unwrap(), Some(ids[0]));
+    assert!(state.field().is_blocked(48, 48, None));
+    // the active stack dies (say, from a retaliation): its turn is over
+    state.add_damage(ids[0], 120, false).unwrap();
+    assert!(state.apply_damage(ids[0]).unwrap().died);
+    assert_eq!(state.turns().active, None);
+    assert_eq!(state.turns().completed, vec![ids[0]]);
+    let events = state.events();
+    assert!(matches!(
+        events[events.len() - 2..],
+        [
+            CombatEvent::Died { .. },
+            CombatEvent::TurnFinished { .. }
+        ]
+    ));
+    // the body keeps its place but the cell is free to walk on
+    assert_eq!(state.units()[0].position.unwrap().at, (48, 48));
+    assert!(!state.field().is_blocked(48, 48, None));
+    assert_eq!(
+        state.field().cell(48, 48).unwrap().occupants,
+        vec![CellOccupant {
+            id: ids[0].0,
+            blocks: false,
+            skip_blocking: false
+        }]
+    );
+    let restored = BattleState::from_json(&state.to_json().unwrap()).unwrap();
+    assert_eq!(restored, state);
+    assert_eq!(state.begin_next_turn().unwrap(), Some(ids[1]));
+    // a snapshot where a body still blocks, or a living unit does not, is refused
+    let mut value: serde_json::Value = serde_json::from_str(&restored.to_json().unwrap()).unwrap();
+    let rows = value["field"]["rows"].as_array_mut().unwrap();
+    let mut flipped = 0;
+    for row in rows {
+        for cell in row["cells"].as_array_mut().unwrap() {
+            for occupant in cell["occupants"].as_array_mut().unwrap() {
+                if occupant["id"] == serde_json::json!(ids[0].0) {
+                    occupant["blocks"] = serde_json::json!(true);
+                    flipped += 1;
+                }
+            }
+        }
+    }
+    assert_eq!(flipped, 1);
+    assert!(BattleState::from_json(&value.to_string()).is_err());
+}
+
+#[test]
+fn direct_kills_keep_wounds_and_drop_pending_damage_that_no_longer_fits() {
+    let mut state = battle();
+    let ids = deploy_both(&mut state);
+    state.add_damage(ids[1], 4, false).unwrap();
+    state.apply_damage(ids[1]).unwrap();
+    state.add_damage(ids[1], 100, false).unwrap();
+    let losses = state.kill(ids[1], 5).unwrap();
+    assert_eq!((losses.killed, losses.count, losses.died), (5, 7, false));
+    // 7 creatures, the top one hurt by 4: 66 hit points, so pending shrinks to 66
+    assert!(matches!(
+        state.units()[1].kind,
+        UnitKind::Creature {
+            count: 7,
+            wounds: 4,
+            pending_damage: 66,
+            ..
+        }
+    ));
+    assert!(state.kill(ids[1], -1).is_err());
+    assert!(state.kill(ids[1], 99).unwrap().died);
+    assert!(!state.units()[1].alive());
+    assert!(!state.field().is_blocked(52, 52, None));
+    assert_eq!(
+        BattleState::from_json(&state.to_json().unwrap()).unwrap(),
+        state
+    );
+}
+
+#[test]
+fn heroes_and_unknown_units_cannot_take_damage_yet() {
+    let mut defender = army(20);
+    defender.army = Army::default();
+    defender.army.slots[0] = Some(Slot::Hero(Hero {
+        portrait: -1,
+        name: "Hero".into(),
+        class: 0,
+        male: true,
+        level: 1,
+        experience: 0,
+    }));
+    let mut state = BattleState::from_armies(&army(10), &defender, &stats(), field(), 1).unwrap();
+    let hero = state.units()[1].id;
+    let before = state.clone();
+    assert!(state.add_damage(hero, 10, false).is_err());
+    assert!(state.apply_damage(hero).is_err());
+    assert!(state.kill(hero, 1).is_err());
+    assert!(state.add_damage(UnitId(999), 10, false).is_err());
+    assert_eq!(state, before);
 }

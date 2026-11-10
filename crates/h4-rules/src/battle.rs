@@ -20,6 +20,7 @@
 pub mod deployment;
 pub mod initiative;
 pub mod state;
+pub mod wounds;
 pub use state::BattleState;
 
 use serde::{Deserialize, Serialize};
@@ -80,8 +81,8 @@ struct Fighter {
     id: u32,
     stats: CreatureStats,
     count: i32,
-    /// Hit points of the top creature (the others are unhurt).
-    top_hp: i32,
+    /// Damage on the top creature (the others are unhurt), as the game keeps it.
+    wounds: i32,
     shots: i32,
     killed: i32,
 }
@@ -92,25 +93,22 @@ impl Fighter {
     }
 
     fn total_hit_points(&self) -> i32 {
-        (self.count - 1) * self.stats.hit_points + self.top_hp
+        self.count * self.stats.hit_points - self.wounds
     }
 
-    /// Take `damage` and return how many creatures died.
+    /// Take `damage` and return how many creatures died: the game's own
+    /// arithmetic (`wounds`), with the hit applied at once.
     fn take(&mut self, damage: i32) -> i32 {
         let hp = self.stats.hit_points.max(1);
-        let left = self.total_hit_points() - damage;
-        let before = self.count;
-        if left <= 0 {
-            self.count = 0;
-            self.top_hp = 0;
-        } else {
-            // the remaining hit points fill whole creatures, the top one may be hurt
-            self.count = (left + hp - 1) / hp;
-            self.top_hp = left - (self.count - 1) * hp;
-        }
-        let died = before - self.count;
-        self.killed += died;
-        died
+        let accepted = damage.clamp(0, self.total_hit_points().max(0));
+        let Ok(after) = wounds::resolve_damage(self.count, self.wounds, accepted, hp) else {
+            // only on overflow, which the cap above rules out
+            return 0;
+        };
+        self.count = after.count;
+        self.wounds = after.wounds;
+        self.killed += after.killed;
+        after.killed
     }
 
     fn as_attacker(&self) -> Attacker {
@@ -187,7 +185,7 @@ pub fn fight(attacker: &Army, defender: &Army, creatures: &[CreatureStats], dice
                 id: dice_id(side, slot),
                 stats: stats.clone(),
                 count: stack.count,
-                top_hp: stats.hit_points,
+                wounds: 0,
                 shots: stats.shots,
                 killed: 0,
             });
@@ -347,11 +345,11 @@ mod tests {
     #[test]
     fn wounds_carry_over_between_hits() {
         let stats = creature(10, 1, 1, 1, 1, 1, 0, 1);
-        let mut f = Fighter { side: Side::Defender, slot: 0, id: 8, stats, count: 5, top_hp: 10, shots: 0, killed: 0 };
-        assert_eq!(f.take(15), 1); // 35 hit points left: 4 creatures, the top one at 5
-        assert_eq!((f.count, f.top_hp), (4, 5));
+        let mut f = Fighter { side: Side::Defender, slot: 0, id: 8, stats, count: 5, wounds: 0, shots: 0, killed: 0 };
+        assert_eq!(f.take(15), 1); // 35 hit points left: 4 creatures, the top one hurt by 5
+        assert_eq!((f.count, f.wounds), (4, 5));
         assert_eq!(f.take(5), 1);
-        assert_eq!((f.count, f.top_hp), (3, 10));
+        assert_eq!((f.count, f.wounds), (3, 0));
         assert_eq!(f.take(100), 3);
         assert!(!f.alive());
         assert_eq!(f.killed, 5);
