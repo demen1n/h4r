@@ -216,7 +216,10 @@ begin_melee_attack(retaliator, attacker, true, true)
 ## Что дальше для порта
 
 1. ~~Сверить исполнением~~ — сделано, см. начало.
-2. Портировать в `BattleState`: удар без подхода — `begin_attack` с одновременным
+2. ~~Портировать проверенное~~ — `h4_rules::battle::melee`: `number_of_attacks`,
+   `RetaliationFlag` (`set`, `new_round`, `turn_started`), `plan_melee_attack`;
+   тест `tests/melee_attack_vectors.rs` гоняет все векторы.
+3. Подключить к `BattleState`: удар без подхода — `begin_attack` с одновременным
    ответом, повторные удары, флаг ответа с меткой, `add_damage` с удачей цели (#66).
-3. Остаются: ветви 0x54/0x1d/0x00/0x09, `t_attack::resolve` по эффектам, слоты
+4. Остаются: ветви 0x54/0x1d/0x00/0x09, `t_attack::resolve` по эффектам, слоты
    `+0x14`/`+0x38`, смысл `bf+0x314 < 4`, четвёртый аргумент `1ee240`.
