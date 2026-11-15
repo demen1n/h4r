@@ -9,7 +9,7 @@ use crate::Result;
 pub const FIELD_SIZE: usize = 102;
 
 /// Half-open cell range `start..end` of each of the `FIELD_SIZE` rows.
-/// From base_initialize (34db60): centered 1180x1024 rectangle, 102 isometric
+/// From the row layout (rva 34db60): centered 1180x1024 rectangle, 102 isometric
 /// rows, step 16.
 pub fn row_bounds() -> impl Iterator<Item = (usize, usize)> {
     (0_i32..FIELD_SIZE as i32).map(|x| {

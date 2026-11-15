@@ -76,6 +76,29 @@ For optional comparisons against a supported local executable, follow
 [the comparison bench instructions](tools/testbench/README.md). These checks
 require separate Python dependencies and are not part of ordinary CI.
 
+## Names of functions and the symbol map
+
+A leaked linker map of a debug build circulates among researchers. It may be used
+locally as a hint for where to look, but its names are not a source for this
+repository:
+
+- **Code.** Name things by what they do, in your own words. A descriptive name
+  that happens to match the map (`can_retaliate`, `begin_attack`) is fine: a short
+  functional name is not copied expression, and the code behind it is our own,
+  written from observed behavior. Do not open the map to decide what to call
+  something, and do not carry over its structure of names wholesale.
+- **Research notes** (`decomp/*.md`, `FORMATS.md`, comments). Refer to a function
+  by its RVA in the supported executable plus our own description, for example
+  "start of a melee attack (`16ede0`)". Do not mark names as coming from the map,
+  do not quote its mangled names or signatures, and do not list its method names
+  next to addresses.
+- **Class names** found in the executable itself (RTTI type descriptors such as
+  `t_battlefield`, `t_combat_creature`, source-file names in assertion strings)
+  are observations of the supported executable and may be used.
+- **Tools** may read a local copy of the map or a name table generated from it
+  (for example to label disassembly), but the map, its contents and generated
+  tables stay local, and their output is not committed.
+
 ## What must stay local
 
 Do not commit or attach to issues or PRs:

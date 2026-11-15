@@ -10,7 +10,7 @@
 //!   forgotten again (rva `1f6b20`, `1f6b60` and the round reset `1ecfb0`);
 //! - [`plan_melee_attack`] — who strikes first, whether the two strikes happen at
 //!   the same time, and what the battle does after the strike animation
-//!   (`t_battlefield::begin_attack`, rva `16ede0`).
+//!   (start of a melee attack, a `t_battlefield` method, rva `16ede0`).
 //!
 //! What a strike does (dice, damage, losses) is not here: that is `damage` and
 //! `wounds`. Connecting these rules to `BattleState` is the next step.
@@ -94,8 +94,8 @@ pub struct RetaliationFlag {
 }
 
 impl RetaliationFlag {
-    /// `set_retaliated` (rva `1f6b20`). `acting_priority` is the priority of the
-    /// stack whose turn it is now (`get_adjusted_speed`). The stamp is written
+    /// Mark the stack as having retaliated (rva `1f6b20`). `acting_priority` is the
+    /// initiative priority of the stack whose turn it is now (rva `1f2cc0`). The stamp is written
     /// only when the flag goes from clear to set.
     pub fn set(&mut self, value: bool, acting_priority: i32) {
         if self.retaliated == value {
@@ -130,7 +130,7 @@ impl RetaliationFlag {
 /// from the battle; nothing here is guessed from creature tables.
 #[derive(Debug, Clone, Default)]
 pub struct MeleeSituation<'a> {
-    /// Answer of `target.can_retaliate(attacker, ranged = false, n = 1)`
+    /// Answer of the retaliation check for (attacker, ranged = false, n = 1)
     /// (`decomp/retaliation.md`; not ported yet).
     pub can_retaliate: bool,
     pub attacker_abilities: &'a [u8],
@@ -156,7 +156,7 @@ pub enum Striker {
     Defender,
 }
 
-/// One `begin_melee_attack` call: an animated strike that adds its damage at once.
+/// One animated strike (rva `16e520`) that adds its damage at once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Strike {
     pub by: Striker,
@@ -167,19 +167,19 @@ pub struct Strike {
     pub retaliation: bool,
 }
 
-/// What runs after the strike animations and after `resolve_attacks` has
+/// What runs after the strike animations and after the queued hits (rva `176160`) have
 /// turned the pending damage into losses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Continuation {
-    /// `end_melee_attack`: the attacker strikes again while `strikes_left > 0`
+    /// After the strike (rva `16ea60`): the attacker strikes again while `strikes_left > 0`
     /// (no retaliation for those), then the attack ends.
     EndMeleeAttack { strikes_left: i32 },
-    /// `begin_melee_retaliation`: the target answers now, if it still can act,
-    /// then `end_melee_attack` with the attacker's remaining strikes.
+    /// Delayed retaliation (rva `16f130`): the target answers now, if it still can
+    /// act, then `EndMeleeAttack` with the attacker's remaining strikes.
     BeginRetaliation,
 }
 
-/// How a melee attack starts (`t_battlefield::begin_attack`).
+/// How a melee attack starts (rva `16ede0`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MeleePlan {
     /// Strikes started now, in this order.
@@ -188,13 +188,13 @@ pub struct MeleePlan {
     pub then: Continuation,
     /// `Some(v)`: the target's `RetaliationFlag::set(v)` is called now
     /// (`v` is false for `unlimited_retaliation`).
-    pub set_retaliated: Option<bool>,
+    pub mark_retaliated: Option<bool>,
     /// `t_battlefield+0x2f0`: the target retaliates in this exchange. Read by
-    /// `end_melee_attack` (the panic ability); set later for `BeginRetaliation`.
+    /// the after-strike step (the panic ability); set later for `BeginRetaliation`.
     pub retaliating: bool,
 }
 
-/// Decide the start of a melee attack, as `begin_attack` (rva `16ede0`) does.
+/// Decide the start of a melee attack, as the exe does (rva `16ede0`).
 ///
 /// Usually a retaliation is **simultaneous**: both strikes start together, so
 /// both roll their damage before any losses are applied, and the target answers
@@ -210,7 +210,7 @@ pub fn plan_melee_attack(s: &MeleeSituation) -> MeleePlan {
         return MeleePlan {
             strikes: vec![strike(Attacker, true, false)],
             then: Continuation::EndMeleeAttack { strikes_left: s.attacks - 1 },
-            set_retaliated: None,
+            mark_retaliated: None,
             retaliating: false,
         };
     }
@@ -233,14 +233,14 @@ pub fn plan_melee_attack(s: &MeleeSituation) -> MeleePlan {
         MeleePlan {
             strikes: vec![strike(Attacker, false, false), strike(Defender, false, true)],
             then: Continuation::EndMeleeAttack { strikes_left: s.attacks - 1 },
-            set_retaliated: Some(!unlimited),
+            mark_retaliated: Some(!unlimited),
             retaliating: true,
         }
     } else if attacker_first {
         MeleePlan {
             strikes: vec![strike(Attacker, true, false)],
             then: Continuation::BeginRetaliation,
-            set_retaliated: None,
+            mark_retaliated: None,
             retaliating: false,
         }
     } else {
@@ -248,7 +248,7 @@ pub fn plan_melee_attack(s: &MeleeSituation) -> MeleePlan {
         MeleePlan {
             strikes: vec![strike(Defender, true, true)],
             then: Continuation::EndMeleeAttack { strikes_left: s.attacks },
-            set_retaliated: Some(!unlimited),
+            mark_retaliated: Some(!unlimited),
             retaliating: true,
         }
     }
@@ -270,7 +270,7 @@ mod tests {
         assert_eq!(plan.strikes.len(), 2);
         assert!(plan.strikes.iter().all(|s| !s.sequential));
         assert_eq!(plan.then, Continuation::EndMeleeAttack { strikes_left: 0 });
-        assert_eq!(plan.set_retaliated, Some(true));
+        assert_eq!(plan.mark_retaliated, Some(true));
     }
 
     #[test]

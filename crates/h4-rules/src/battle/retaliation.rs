@@ -1,5 +1,6 @@
-//! May a stack answer an attack? `t_combat_creature::can_retaliate` (rva `1f23c0`)
-//! and `t_battlefield::can_shoot` (rva `170780`), as the exe decides them
+//! May a stack answer an attack? The retaliation check of `t_combat_creature`
+//! (rva `1f23c0`) and the "can shoot" check of `t_battlefield` (rva `170780`), as the
+//! exe decides them
 //! (`decomp/retaliation.md`; verified by executing the original code:
 //! `tests/retaliation_vectors.tsv`).
 //!
@@ -43,7 +44,7 @@ pub struct Footprint {
     pub size: i32,
 }
 
-/// `t_battlefield::can_shoot` (rva `170780`): the stack has the `ranged` ability,
+/// Can the stack shoot (rva `170780`): it has the `ranged` ability,
 /// no effect 0x2f, shots left, and nothing in the battlefield's threat map
 /// (`threats` is the number stored there for this stack; it seems to count
 /// enemies standing next to it, which is not verified).
@@ -101,7 +102,7 @@ fn gap_in_cells(attacker: Footprint, target: Footprint) -> i32 {
     (distance - target.size * 8 - attacker.size * 8 + 8) >> 4
 }
 
-/// `t_combat_creature::can_retaliate(attacker, ranged, n)`, checks in the exe's order.
+/// The retaliation check (attacker, ranged, n), checks in the exe's order (rva `1f23c0`).
 pub fn can_retaliate(c: &RetaliationCheck) -> bool {
     let target_has_effect = |e: u16| c.target_effects.contains(&e);
     if c.target_flag.retaliated && c.n < 2 {

@@ -97,9 +97,9 @@ pub struct Attacker {
     pub number: i32,
     pub damage_low: i32,
     pub damage_high: i32,
-    /// Attack skill with all bonuses (`get_offense(ranged)`).
+    /// Attack skill with all bonuses (a virtual getter, argument `ranged`).
     pub offense: f32,
-    /// `get_defense_reduction(ranged)`: lets the attack cancel the target's defense bonus.
+    /// Defense reduction (a virtual getter, argument `ranged`): lets the attack cancel the target's defense bonus.
     /// 1.0 means no effect.
     pub defense_reduction: f32,
     pub school: School,
@@ -156,7 +156,8 @@ pub enum DamageEvent {
 }
 
 /// The average base damage: `(low + high) * number / 2`. This is what
-/// `get_melee_damage` uses (the AI's and the cursor's estimate), not the real hit.
+/// the average melee damage uses (rva `1ee4d0`: the AI's and the cursor's estimate),
+/// not the real hit.
 pub fn average_base_damage(attacker: &Attacker) -> i32 {
     (attacker.damage_low + attacker.damage_high) * attacker.number / 2
 }
@@ -265,7 +266,7 @@ pub fn modify_damage(
 }
 
 /// Attack divided by defense, kept within 0.05..=20 (rva `250a60`,
-/// `t_abstract_creature::get_damage_modifier`).
+/// a method of `t_abstract_creature`).
 ///
 /// The attacker's `defense_reduction` works against the target's `defense_bonus`: while
 /// it's no bigger than the bonus it multiplies the attack; once it's bigger, the bonus is

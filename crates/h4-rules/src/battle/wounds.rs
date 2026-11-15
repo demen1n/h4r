@@ -6,10 +6,10 @@
 //! `number * hit_points - wounds` hit points left ([`total_hits`]).
 //!
 //! Damage arrives in two steps, like in the exe:
-//! 1. [`accept_damage`] (`t_combat_creature::add_damage`, rva `1f2800`) adds a
+//! 1. [`accept_damage`] (the exe's damage intake, rva `1f2800`) adds a
 //!    hit to the stack's *pending* damage, but never more than the stack can
 //!    still lose;
-//! 2. [`resolve_damage`] (`t_combat_creature::resolve_damage`, rva `1eee40`)
+//! 2. [`resolve_damage`] (rva `1eee40`)
 //!    moves the pending damage into the wounds and counts the dead.
 //!
 //! The functions here are plain arithmetic on numbers, so they can be compared
@@ -29,7 +29,7 @@ pub struct Resolved {
 
 /// Hit points the whole stack has left: every creature is whole except the top
 /// one. Shields from spells and the hit point bonuses of effects, which the
-/// exe adds in `get_total_hits` (rva `1f5350`), are not part of this yet.
+/// exe adds when it counts the stack's hit points (rva `1f5350`), are not part of this yet.
 pub fn total_hits(count: i32, wounds: i32, hit_points: i32) -> Result<i32, String> {
     count
         .checked_mul(hit_points)

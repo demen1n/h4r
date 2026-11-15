@@ -1,50 +1,51 @@
 # Ближний удар: порядок шагов и ответный удар (#65)
 
-Источник — русский exe 3.0 (Бука), адреса — RVA. Имена методов взяты из отладочного
-мапа (`third_party/homm4-symbols`, `battlefield.obj` и `attack.obj`) и привязаны по
-порядку линковки, перекрёстным вызовам и сигнатурам. Перенесено готовым только
-`t_battlefield::resolve_attacks` и конструктор `t_attack`. Всё ниже прочитано по
-дизассемблеру (`tools/disasm.py`, `tools/xrefs.py`) и пока не портировано.
+Источник — русский exe 3.0 (Бука), адреса — RVA. Функции найдены по перекрёстным
+вызовам от уже известных (бросок урона `1ee240`, приём урона `1f2800`, проверка
+ответа `1f23c0`) и по вызовам через vftable; названия ниже — наши описательные
+(в псевдокоде — наши условные имена). Классы — по RTTI exe. Разбор по дизассемблеру
+(`tools/disasm.py`, `tools/xrefs.py`).
 
 **Сверено исполнением** (`tools/testbench/melee_attack.py`, 6936 векторов в
 `crates/h4-rules/tests/melee_attack_vectors.tsv`): число ударов `1f1d10`,
-`set_retaliated` `1f6b20` с настоящим `177db0`, сброс `1f6b60`, блок флага в сбросе
-раунда `1ecfb0`, и `begin_attack` `16ede0` целиком — с настоящим связыванием
-продолжений, которые стенд затем сам вызывает через их vtable. Заглушки — только
-граница: анимированный удар `begin_melee_attack`, очередь `175a70`, приоритет
-`1f2cc0`, `dynamic_cast` и виртуальные аксессоры. Всё, что ниже не названо в этом
-списке, по-прежнему только прочитано.
+пометка «ответил» `1f6b20` с настоящей меткой времени `177db0`, сброс `1f6b60`,
+блок флага в сбросе раунда `1ecfb0`, и начало ближней атаки `16ede0` целиком —
+с настоящим связыванием продолжений, которые стенд затем сам вызывает через их
+vtable. Заглушки — только граница: анимированный удар `16e520`, очередь `175a70`,
+приоритет `1f2cc0`, `dynamic_cast` и виртуальные аксессоры. Всё, что ниже не названо
+в этом списке, только прочитано. Порт: `h4_rules::battle::melee`.
 
 ## Функции
 
-| функция | rva | привязка |
+| что делает | rva | наше имя в псевдокоде |
 |---|---|---|
-| `t_battlefield::begin_attack(creature& attacker, bool return_after)` | `16ede0` | порядок линковки; в отладочной сборке без второго аргумента |
-| `t_battlefield::begin_melee_attack(creature& a, attackable& t, bool sequential, bool retaliation)` | `16e520` | 4 аргумента, как в мапе |
-| `t_battlefield::end_melee_attack(int strikes_left, bool return_after)` | `16ea60` | в мапе один аргумент |
-| `t_battlefield::begin_melee_retaliation(bool return_after)` | `16f130` | обработчик из `begin_attack` |
-| `t_battlefield::add_attack(creature*, attackable*, bool ranged, const msg&)` | `175ea0` | сразу после `cast_spell` (`175e30`), сигнатура совпадает |
-| `t_battlefield::resolve_attacks()` | `176160` | перенесённое имя |
-| `t_battlefield::get_retaliation_time_stamp()` | `177db0` | `[bf+0x28]->get_adjusted_speed()` |
-| очередь продолжений: `push(handler, bool front)` | `175a70` | список `bf+0x460` |
-| `t_attack::t_attack(bf, attacker, target, bool ranged, int damage)` | `152960` | перенесённое имя |
-| `t_attack::check_random_curse` | `152a20` | 9 проклятий, бросок `% число` |
-| `t_attack::resolve` | `1531b0` | порядок `attack.obj` |
-| `t_attack::check_vampirism` | `154740` | порядок `attack.obj` |
-| число ударов `get_number_of_attacks(bool ranged)` (имя условное) | `1f1d10` | |
-| «может действовать» (имя в переносе ошибочно: `on_battlefield_destruction…`) | `155ea0` | |
-| `set_retaliated(bool)` / сброс по метке | `1f6b20` / `1f6b60` | |
+| начало ближней атаки (`this` — `t_battlefield`; атакующий, флаг «вернуться») | `16ede0` | `start_melee(attacker, return_after)` |
+| один анимированный удар (кто, по кому, «по очереди», «это ответ») | `16e520` | `strike(who, target, sequential, retaliation)` |
+| продолжение после анимации удара (осталось ударов, флаг «вернуться») | `16ea60` | `after_strike(strikes_left, return_after)` |
+| отложенный ответ после первого удара атакующего | `16f130` | `delayed_retaliation(return_after)` |
+| удар по цели: бросок, приём урона, запись в очередь ударов | `175ea0` | `hit(attacker, target, ranged, message)` |
+| разбор очереди ударов (потери и эффекты после удара) | `176160` | `settle_hits()` |
+| метка времени: приоритет ходящего существа | `177db0` | `now()` |
+| очередь продолжений: положить обработчик (в начало или в конец) | `175a70` | `очередь <-` |
+| `t_attack`: конструктор (поле, атакующий, цель, дальний, урон) | `152960` | |
+| `t_attack`: случайное проклятие (9 проклятий, бросок `% число`) | `152a20` | |
+| `t_attack`: разбор одного удара | `1531b0` | |
+| `t_attack`: вампиризм | `154740` | |
+| число ударов (дальний или ближний) | `1f1d10` | `attacks(ranged)` |
+| «может действовать» | `155ea0` | `can_act` |
+| пометить «ответил» / забыть по метке | `1f6b20` / `1f6b60` | `mark_retaliated(v)` / `forget_if(stamp)` |
 
 Поля поля боя: `+0x28` — ходящее существо, `+0x504` — цель текущего действия,
 `+0x2f0` — «идёт обмен ударами с ответом», `+0x314` — пройденное расстояние
 (тот же `moved`, что идёт в `charging`, см. `damage.md`), `+0x44`/`+0x48` — очередь
-ударов `t_attack` и её длина, `+0x478` — обработчик `resolve_attacks`, `+0x4f8` —
+ударов `t_attack` и её длина, `+0x478` — обработчик разбора ударов, `+0x4f8` —
 клетка, с которой атакующий начал (для `strike_and_return`).
 
 Слоты vftable `t_attackable_object` у `t_combat_creature` (таблица rva `582450`,
-проверено по адресам): `+0x00` `add_damage`, `+0x04` яд (`1fa9e0`), `+0x08`
-`apply_damage`, `+0x10` `can_retaliate`, `+0x30` `has_ability`, `+0x34` «жив»,
-`+0x24` — сам объект-цель. Смысл `+0x14` и `+0x38` не установлен.
+проверено по адресам): `+0x00` приём урона (`1f2800`), `+0x04` яд (`1fa9e0`), `+0x08`
+применение урона (`1ef2d0`), `+0x10` проверка ответа (`1f23c0`), `+0x30` «есть
+способность», `+0x34` «жив», `+0x24` — сам объект-цель. Смысл `+0x14` и `+0x38` не
+установлен.
 
 ## Число ударов (`1f1d10`)
 
@@ -62,92 +63,92 @@ n = 1; если эффект 0x7a: n = 2; если эффект 0x82: n += 1
 Жив (слот `+0x34`) и нет эффектов 0x0b, 0xba, 0x9a (часть списка «недееспособен»
 из `retaliation.md`).
 
-## `begin_attack` — начало ближней атаки
+## Начало ближней атаки (`16ede0`)
 
 ```
 target    = [bf+0x504]
-strikes   = число ударов атакующего (ближний)
+strikes   = attacks(ranged = false) атакующего
 bf.+0x2f0 = 0
-очередь  <- resolve_attacks
+очередь  <- settle_hits
 target.slot14()
-если не target.can_retaliate(attacker, ranged=false, n=1):
-    очередь <- end_melee_attack(strikes - 1, return_after)
-    begin_melee_attack(attacker, target, sequential=true, retaliation=false)
+если не target.проверка_ответа(attacker, ranged = false, n = 1):
+    очередь <- after_strike(strikes - 1, return_after)
+    strike(attacker, target, sequential = true, retaliation = false)
 иначе:
     a_first = attacker has first_strike (0x17) и target не имеет first_strike_immunity (0x18)
     d_first = target  has first_strike и attacker не имеет first_strike_immunity
-    если цель не может действовать, или attacker.slot38, или target.slot38:
+    если цель не can_act, или attacker.slot38, или target.slot38:
         a_first = true; d_first = false
     иначе если не a_first и bf.+0x314 < 4:
         d_first = false
     retaliator = цель как существо
     если a_first == d_first:            # обычный случай — удары одновременно
-        retaliator.set_retaliated(нет unlimited_retaliation 0x4e)
-        очередь <- end_melee_attack(strikes - 1, return_after)
+        retaliator.mark_retaliated(нет unlimited_retaliation 0x4e)
+        очередь <- after_strike(strikes - 1, return_after)
         bf.+0x2f0 = 1
-        begin_melee_attack(attacker,   target,   sequential=false, retaliation=false)
-        begin_melee_attack(retaliator, attacker, sequential=false, retaliation=true)
+        strike(attacker,   target,   sequential = false, retaliation = false)
+        strike(retaliator, attacker, sequential = false, retaliation = true)
     иначе если a_first:                 # первый удар атакующего
-        очередь <- begin_melee_retaliation(return_after)
-        begin_melee_attack(attacker, target, true, false)
+        очередь <- delayed_retaliation(return_after)
+        strike(attacker, target, true, false)
     иначе:                              # цель бьёт первой
         bf.+0x2f0 = 1
-        retaliator.set_retaliated(нет 0x4e)
-        очередь <- end_melee_attack(strikes, return_after)   # без «- 1»
-        begin_melee_attack(retaliator, attacker, true, true)
+        retaliator.mark_retaliated(нет 0x4e)
+        очередь <- after_strike(strikes, return_after)   # без «- 1»
+        strike(retaliator, attacker, true, true)
 ```
 
-**Главное.** Без первого удара ответ идёт **одновременно** с ударом атакующего: обе
-`begin_melee_attack` вызываются подряд, урон обоих бросается до того, как потери
-применены (урон ожидающий, `apply_damage.md`). Поэтому ответ бьёт полным стеком.
-Ответ возможен только если `can_retaliate` разрешил его **до** удара.
+**Главное.** Без первого удара ответ идёт **одновременно** с ударом атакующего: оба
+`strike` вызываются подряд, урон обоих бросается до того, как потери применены (урон
+ожидающий, `apply_damage.md`). Поэтому ответ бьёт полным стеком. Ответ возможен,
+только если проверка ответа разрешила его **до** удара.
 
 Условие `bf.+0x314 < 4` подтверждено исполнением: при 3 первый удар защитника
 отменяется и обмен становится одновременным, при 4 защитник бьёт первым. Единицы —
 те же, что у `moved` для `charging`; что это за расстояние в клетках, не выяснено.
 Если цель не может действовать или у любой стороны слот `+0x38` истинен, атакующий
-бьёт первым и ответ откладывается до `begin_melee_retaliation` (там цель проверяется
+бьёт первым и ответ откладывается до `delayed_retaliation` (там цель проверяется
 ещё раз и при недееспособности не отвечает).
 
-## `begin_melee_retaliation` — ответ после первого удара атакующего
+## Отложенный ответ (`16f130`)
 
 ```
-retaliator = [bf+0x504]; n = число ударов атакующего - 1
-если retaliator не может действовать: выход   # и ничего не ставится в очередь
+retaliator = [bf+0x504]; n = attacks(ranged = false) атакующего - 1
+если retaliator не can_act: выход   # и ничего не ставится в очередь
 bf.+0x2f0 = 1
-retaliator.set_retaliated(нет 0x4e)
-очередь <- resolve_attacks
-очередь <- end_melee_attack(n, return_after)
-begin_melee_attack(retaliator, attacker, true, true)
+retaliator.mark_retaliated(нет 0x4e)
+очередь <- settle_hits
+очередь <- after_strike(n, return_after)
+strike(retaliator, attacker, true, true)
 ```
 
-`can_retaliate` повторно не проверяется. Если цель погибла или обездвижена первым
-ударом, функция выходит, не поставив `end_melee_attack`: оставшиеся удары атакующего
+Проверка ответа повторно не делается. Если цель погибла или обездвижена первым
+ударом, функция выходит, не поставив `after_strike`: оставшиеся удары атакующего
 и возврат `strike_and_return` в этом месте не запускаются (проверить, не делает ли
 этого кто-то ещё).
 
-## `begin_melee_attack` — один удар
+## Один удар (`16e520`)
 
 Анимация, затем:
 
 - `arc_breath_attack` (0x54), `hydra_strike` (0x1d) или `3_headed_attack` (0x00) —
   ветвь `16cfa0` (несколько целей, не разобрано);
-- иначе: `t_combat_flinch::add(target, !sequential)`, затем
-  `add_attack(attacker, target, ranged=false, msg)`; при `breath_attack` (0x09) —
+- иначе: вздрагивание цели (`t_combat_flinch`, `1fc170`, с флагом `!sequential`),
+  затем `hit(attacker, target, ranged = false, message)`; при `breath_attack` (0x09) —
   ещё `16da90` (клетки за целью, не разобрано).
 
 `retaliation` выбирает только текст сообщения.
 
-## `add_attack` — урон сразу, эффекты потом
+## Удар по цели (`175ea0`) — урон сразу, эффекты потом
 
 ```
 если ranged:
-    damage = 1ee240(target, ranged=true, moved=0, 0) / max(1, range_factor)   # 170800
+    damage = 1ee240(target, ranged = true, moved = 0, 0) / max(1, 170800(...))   # дальность
 иначе:
     moved = (attacker == bf.+0x28) ? bf.+0x314 : 0
-    damage = 1ee240(target, ranged=false, moved, x)      # x = 1701f0(две точки)
+    damage = 1ee240(target, ranged = false, moved, x)      # x = 1701f0(две точки)
 если target.slot38: damage = 0
-иначе: damage = target.add_damage(damage, attacker, luck=true, permanent=false, msg)
+иначе: damage = target.приём_урона(damage, attacker, luck = true, permanent = false, message)
 если не ranged: очередь ударов поля <- t_attack(bf, attacker, target, false, damage)
 если attacker has poison (0x31) и цель — существо и эффект 0x6f может на неё подействовать:
     p = damage; если target has death_protection (0x10): p >>= 1
@@ -155,54 +156,53 @@ begin_melee_attack(retaliator, attacker, true, true)
 ```
 
 `1ee240` — бросок урона с модификаторами (`damage.md`), то есть `damage::attack_hit`
-без финальных пределов: пределы и удача цели — внутри `add_damage`
+без финальных пределов: пределы и удача цели — внутри приёма урона
 (`apply_damage.md`, шаги 4–6). Удача цели бросается при каждом ударе (третий
-аргумент `add_damage` = 1). Четвёртый аргумент `1ee240` здесь — результат `1701f0` от двух точек (по
-положению в `battlefield.obj` похоже на `crosses_wall` → `t_wall_bonus`, не проверено);
-в `damage.md` этот аргумент описан как удача 0/1/2 — перепроверить, что это.
+аргумент приёма урона = 1). Четвёртый аргумент `1ee240` здесь — результат `1701f0`
+от двух точек (центров атакующего и цели), смысл не установлен; в `damage.md` этот
+аргумент описан как удача 0/1/2 — перепроверить, что это.
 
-## `end_melee_attack` — что после анимации удара
+## После удара (`16ea60`)
 
 ```
 если target has panic (0x30), bf.+0x2f0 и attacker.slot0c(target):
     attacker: эффект 6 снимается (1f1f80); выход
-если strikes_left > 0 и атакующий может действовать и цель жива:
-    очередь <- end_melee_attack(strikes_left - 1, return_after)
+если strikes_left > 0 и атакующий can_act и цель жива:
+    очередь <- after_strike(strikes_left - 1, return_after)
     target.slot14()
-    begin_melee_attack(attacker, target, true, false)          # следующий удар
+    strike(attacker, target, true, false)          # следующий удар
 иначе:
     attacker: эффект 6 снимается
     если attacker has panic (0x30): target.slot0c(attacker)
-    если return_after, атакующий может действовать, нет эффекта 9 и он не на исходной клетке:
+    если return_after, атакующий can_act, нет эффекта 9 и он не на исходной клетке:
         вернуться на bf.+0x4f8 (16c300)
 ```
 
 Повторные удары (`strikes_twice` и т. п.) идут **после** ответа и без ответа на них
-(ответ разрешается только в `begin_attack`).
+(ответ разрешается только в начале атаки).
 
-## `resolve_attacks` и `t_attack::resolve`
+## Разбор ударов (`176160`) и разбор одного удара (`1531b0`)
 
-Обработчик `bf+0x478` = `resolve_attacks` ставится в очередь перед продолжением,
+Обработчик `bf+0x478` = разбор ударов ставится в очередь перед продолжением,
 поэтому после анимации удара сначала применяются потери, потом следующий шаг.
-`resolve_attacks`: для каждого `t_attack` — `resolve`, затем для каждого —
-`check_vampirism`, затем очередь очищается.
+Разбор: для каждого `t_attack` — разбор удара `1531b0`, затем для каждого —
+вампиризм `154740`, затем очередь очищается.
 
-`resolve` (крупно, по вызовам): ауры и `fire_shield` (0x16, только ближний,
-`(damage + 3) / 4`), затем `target.apply_damage(bf, true)`; если цель жива —
-`check_random_curse` (0x32), `check_stone_gaze`, затем остальные эффекты после удара
-(привязка `binding` через `set_binding`, бросок `203280` в нескольких местах).
-Подробно не разобрано.
+Разбор одного удара (крупно, по вызовам): ауры и `fire_shield` (0x16, только ближний,
+`(damage + 3) / 4`), затем применение урона цели (слот `+0x08`, с флагом true); если
+цель жива — случайное проклятие (`152a20`, способность `random_curse` 0x32), взгляд
+медузы (`152da0`), затем остальные эффекты после удара (привязка `binding` через
+`1f4610`, бросок `203280` в нескольких местах). Подробно не разобрано.
 
 ## Флаг «уже отвечал» (`+0xa9`) и метка `+0xb70`
 
-- `set_retaliated(v)` (`1f6b20`): если значение меняется на true —
-  `+0xb70 = get_retaliation_time_stamp() - 3 000 000`. Метка — приоритет
-  (`get_adjusted_speed`, `initiative.md`) существа, которое ходит сейчас.
-  Существо с `unlimited_retaliation` вызывает `set_retaliated(false)`.
+- `mark_retaliated(v)` (`1f6b20`): если значение меняется на true —
+  `+0xb70 = now() - 3 000 000`, где `now()` (`177db0`) — приоритет инициативы
+  (`1f2cc0`, `initiative.md`) существа, которое ходит сейчас.
+  Существо с `unlimited_retaliation` вызывает `mark_retaliated(false)`.
 - Сброс раунда (`1ecfb0`): если флаг стоит, `+0xb70 += 3 000 000`.
-- Выбор следующего ходящего (`167d10`, после `select`): всем существам поля
-  `clear_if(stamp = приоритет нового ходящего)` (`1f6b60`): флаг снимается, если
-  `stamp <= +0xb70`.
+- Выбор следующего ходящего (`167d10`): всем существам поля `forget_if(приоритет
+  нового ходящего)` (`1f6b60`): флаг снимается, если `stamp <= +0xb70`.
 
 Итог: ответ восстанавливается **через раунд в той же точке очереди**: в следующем
 раунде, когда ходит существо с приоритетом не выше того, что было у атакующего в
@@ -210,7 +210,7 @@ begin_melee_attack(retaliator, attacker, true, true)
 приоритета). Если такой точки в следующем раунде не было, флаг снимется с первым
 ходом через раунд.
 
-`can_retaliate` из `begin_attack` вызывается с `n = 1`, поэтому флаг блокирует ответ
+Проверка ответа из начала атаки вызывается с `n = 1`, поэтому флаг блокирует ответ
 (условие `+0xa9 && n < 2`, `retaliation.md`).
 
 ## Что дальше для порта
@@ -219,7 +219,7 @@ begin_melee_attack(retaliator, attacker, true, true)
 2. ~~Портировать проверенное~~ — `h4_rules::battle::melee`: `number_of_attacks`,
    `RetaliationFlag` (`set`, `new_round`, `turn_started`), `plan_melee_attack`;
    тест `tests/melee_attack_vectors.rs` гоняет все векторы.
-3. Подключить к `BattleState`: удар без подхода — `begin_attack` с одновременным
-   ответом, повторные удары, флаг ответа с меткой, `add_damage` с удачей цели (#66).
-4. Остаются: ветви 0x54/0x1d/0x00/0x09, `t_attack::resolve` по эффектам, слоты
+3. Подключить к `BattleState`: удар без подхода с одновременным ответом, повторные
+   удары, флаг ответа с меткой, приём урона с удачей цели (#66).
+4. Остаются: ветви 0x54/0x1d/0x00/0x09, разбор удара по эффектам, слоты
    `+0x14`/`+0x38`, смысл `bf+0x314 < 4`, четвёртый аргумент `1ee240`.

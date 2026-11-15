@@ -2,10 +2,10 @@
 //!
 //! Players move one after another; when the last one ends their turn, a new day starts
 //! for everybody. From the exe (`decomp/turns.md`):
-//! - every member of every army gets its full movement back (`t_creature_stack`'s
-//!   `process_new_day`, rva `250ca0`);
-//! - neutral monsters on the map grow a little every day (`t_creature::process_new_day`,
-//!   rva `23de10`).
+//! - every member of every army gets its full movement back (new day of
+//!   a `t_creature_stack`, rva `250ca0`);
+//! - neutral monsters on the map grow a little every day (new day of a
+//!   `t_creature`, rva `23de10`).
 //!
 //! Not modelled yet: the neutral turn between players (monsters don't move anyway), weeks
 //! and months (dwellings, the "week of ..." creature), income, towns, timed bonuses

@@ -142,7 +142,7 @@ answers are retained in `h4-rules/tests/effectiveness_vectors.tsv` for CI.
 
 Use `--only immunity` for the four independent eligibility filters. The fixture
 supplies effect-0x98 record flags, ability/effect lists, side accessors and target
-resistance. The original functions calculate each filter outcome; `is_hostile`
+resistance. The original functions calculate each filter outcome; the hostility check
 and flag checks execute natively. Localized diagnostic strings are marked
 initialized and diagnostic output is disabled; a minimal SEH chain supports the
 original no-output diagnostic helper. This does not test the full `1b30a0`
@@ -260,11 +260,11 @@ See `decomp/initiative.md` and `cargo test -p h4-rules --test initiative`.
 
 Applying damage to a stack (#68):
 `apply_damage.py --exe bin/heroes4.exe --out PATH` records 1,800 fixtures: native
-`resolve_damage` (RVA `1eee40`) and `kill` (RVA `1f3860`) executed whole, and the
-pending-damage cap block of `add_damage` (`1f2a91..1f2ab8`). Number, wounds, pending
+turning pending damage into losses (RVA `1eee40`) and killing N creatures (RVA `1f3860`)
+executed whole, and the pending-damage cap block of the damage intake (`1f2a91..1f2ab8`). Number, wounds, pending
 damage, hit points, the permanent flag/counter and total hits are fixture inputs.
 Effects are absent; text formatting, the floating damage text (arguments recorded),
-label refresh and `clear_influence` are stubbed. Poison, spell shields, luck, the
+label refresh and clearing the stack's influence are stubbed. Poison, spell shields, luck, the
 martyr redirect and the death sequence are excluded.
 See `decomp/apply_damage.md` and `cargo test -p h4-rules --test apply_damage_vectors`.
 
@@ -276,18 +276,18 @@ See `decomp/apply_damage.md` and `cargo test -p h4-rules --test apply_damage_vec
 ```
 
 6,936 cases (see `decomp/melee_attack.md`): number of attacks `1f1d10`
-(melee/ranged, effects 0x7a/0x82, four abilities, shot caps); `set_retaliated`
+(melee/ranged, effects 0x7a/0x82, four abilities, shot caps); marking a stack as retaliated
 `1f6b20` with the native time stamp getter `177db0`; flag clearing `1f6b60`;
 the retaliation block of the round reset (`1ed09b..1ed0c3`); and
-`t_battlefield::begin_attack` `16ede0` whole over can-retaliate, first strike and
+the start of a melee attack `16ede0` whole over can-retaliate, first strike and
 immunity on both sides, strikes twice, unlimited retaliation, a stunned or dead
 target, both `+0x38` slots, moved 3/4 and the return flag. The continuation
 handlers it binds are built by native code and then invoked through their own
-vtables, so the bench observes the bound `end_melee_attack` /
-`begin_melee_retaliation` arguments. Stubs are boundaries only: the animated
+vtables, so the bench observes the bound arguments of the after-strike step
+(`16ea60`) and the delayed retaliation (`16f130`). Stubs are boundaries only: the animated
 strike `16e520` (recorded), the queue push `175a70` (recorded), the priority
 `1f2cc0` (verified separately by `initiative.py`), `dynamic_cast`, the
-`resolve_attacks` handler and fixture accessors.
+handler that settles queued hits and fixture accessors.
 
 ## Retaliation checks
 
@@ -296,8 +296,8 @@ strike `16e520` (recorded), the queue push `175a70` (recorded), the priority
   --out crates/h4-rules/tests/retaliation_vectors.tsv
 ```
 
-4,490 cases of `t_combat_creature::can_retaliate` (`1f23c0`), executed whole with
-the native `can_shoot` (`170780`), footprint centers, x87 distance and `__ftol`:
+4,490 cases of the retaliation check of `t_combat_creature` (`1f23c0`), executed
+whole with the native "can shoot" check (`170780`), footprint centers, x87 distance and `__ftol`:
 the retaliated flag against `n`, effects 0xba/0x9a and their strength fields,
 ranged retaliation (ability, effect 0x2f, shots, threat count), melee reach with
 `long_weapon` on either side over sizes 1-3 and exact positions, and the

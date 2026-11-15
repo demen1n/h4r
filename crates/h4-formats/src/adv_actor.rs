@@ -9,11 +9,11 @@
 //!     u16-prefixed name ("wait", "fidget", "prewalk", "walk", "postwalk", "attack", ...)
 //!     u8 frames per second
 //!     8 u16-prefixed actor_sequence names, directions ne, e, se, s, sw, w, nw, n
-//! i32 x, i32 y      offset (get_offset)
-//! i32 x, i32 y      where the player's flag goes (get_flag_offset)
+//! i32 x, i32 y      offset
+//! i32 x, i32 y      where the player's flag goes
 //! ```
 //!
-//! Method names come from the debug map (`get_frames_per_second`, `get_walk_length`, ...).
+//! The meaning of the fields was checked by where the game reads them (walking and drawing).
 
 use crate::reader::{bad, Reader};
 use crate::Result;

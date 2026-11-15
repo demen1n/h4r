@@ -1,6 +1,6 @@
 //! The middle of a `.h4c` map: everything between the header and the tiles.
 //!
-//! Order as in `t_adventure_map::read_from_map` (rva `d15c0`):
+//! Order as in the map reader of `t_adventure_map` (rva `d15c0`):
 //!
 //! 1. global events ([`GlobalEvents`]): timed, triggerable, continuous, placed;
 //! 2. twelve obelisk reward lists (rva `7c65f0`, one per obelisk color);
@@ -10,8 +10,8 @@
 //! 5. AI importance of artifacts and spells (rva `147f30`, `45ea60` twice);
 //! 6. the objects (rva `cf010`): u32 count, then position + kind + body for each.
 //!
-//! Every object type has its own `read_from_map` (vtable slot 36 of its class). The type is
-//! stored by *name* (the `t_qualified_adv_object_type` before the body); the numeric ids
+//! Every object type has its own map reader (vtable slot 36 of its class). The type is
+//! stored by *name* (the qualified object type before the body); the numeric ids
 //! next to the names are from an older enum and don't match the game's, so we go by names.
 //! The bodies are read as far as needed to get to the next object; most of the fields are
 //! only checked, a few useful ones (owner, names, garrison) are kept.
@@ -165,7 +165,7 @@ fn read_player_data(r: &mut Reader, version: u16, players: &[u8]) -> Result<()> 
     Ok(())
 }
 
-/// `t_artifact_set::read_impl` (rva `1516f0`): version 0, u16 bit count, the bits.
+/// Reader of an artifact set (rva `1516f0`): version 0, u16 bit count, the bits.
 /// `t_artifact_set`: version 0, u16 bit count, the bits (bit i = byte i / 8, low bit first).
 fn read_artifact_set(r: &mut Reader) -> Result<Vec<bool>> {
     zero_version(r, "artifact set")?;
@@ -243,7 +243,7 @@ fn read_objects(r: &mut Reader) -> Result<Vec<MapObject>> {
     Ok(objects)
 }
 
-/// `t_army::read_from_map` (rva `523a10`), versions up to 9.
+/// The map reader of `t_army` (rva `523a10`), versions up to 9.
 fn read_map_army(r: &mut Reader) -> Result<ObjectKind> {
     let at = r.pos;
     let version = r.u16()?;
@@ -269,7 +269,7 @@ fn read_map_army(r: &mut Reader) -> Result<ObjectKind> {
     Ok(ObjectKind::Army { owner, army, events })
 }
 
-/// Object types whose `read_from_map` is the base one (`t_adventure_object::read_from_map`,
+/// Object types whose map reader is the base one (that of `t_adventure_object`,
 /// rva `fab60`): just a version that must be 0.
 const PLAIN: &[&str] = &[
     "academy", "arena", "artifact_pile", "blacksmith", "blattner_stone", "border_gate", "border_guard",
@@ -434,7 +434,7 @@ fn read_placed_body(r: &mut Reader, p: &mut Placed) -> Result<()> {
                 }
             }
             "random_monster" | "random_random_monster" => {
-                // t_random_monster_base::read_from_map (rva 7f36a0)
+                // map reader of the random monster (rva 7f36a0)
                 let v = version(r, 4, t)?;
                 if v >= 3 && r.u8()? != 0 {
                     r.u8()?;
@@ -487,7 +487,7 @@ fn read_placed_body(r: &mut Reader, p: &mut Placed) -> Result<()> {
             }
             "quest_gate" | "quest_guard" | "seers_hut" => read_quest_site(r, t)?,
             "random_town" => {
-                // t_random_town::read_from_map (rva 7f5220), version 7 in all maps
+                // map reader of the random town (rva 7f5220), version 7 in all maps
                 let at = r.pos;
                 let v = r.u16()?;
                 if v != 7 {
@@ -513,7 +513,7 @@ fn read_placed_body(r: &mut Reader, p: &mut Placed) -> Result<()> {
     Ok(())
 }
 
-/// `t_owned_scriptable_adv_object::read_from_map` (rva `7d7550`) with the version of the
+/// The map reader of `t_owned_scriptable_adv_object` (rva `7d7550`) with the version of the
 /// derived class: owner since 1, triggerable events since 2.
 fn read_owned_scriptable(r: &mut Reader, version: u16) -> Result<Option<u8>> {
     let mut owner = None;
@@ -566,7 +566,7 @@ fn read_random_kind(r: &mut Reader) -> Result<RandomLink> {
     })
 }
 
-/// `t_abstract_town::read_map_data` (rva `417640`), versions 6..8.
+/// Town data of `t_abstract_town` (rva `417640`), versions 6..8.
 fn read_town_data(r: &mut Reader, p: &mut Placed) -> Result<()> {
     let at = r.pos;
     let v = r.u16()?;

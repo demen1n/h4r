@@ -21,7 +21,7 @@ use crate::creatures::CreatureStats;
 /// Number of terrain types (`h4_formats::map::TERRAIN_NAMES`).
 pub const TERRAIN_TYPES: usize = 19;
 
-/// Cost of a straight step on each terrain (`get_terrain_cost`, rva `250e90`): 100 unless
+/// Cost of a straight step on each terrain (rva `250e90`): 100 unless
 /// the table at VA `0x985378` says otherwise.
 const TERRAIN_COST: [i32; TERRAIN_TYPES] = [
     100, // water
@@ -51,7 +51,7 @@ pub fn terrain_cost(terrain: u8) -> i32 {
 /// preserve grass, stronghold rough.
 const NATIVE_TERRAIN: [u8; 6] = [1, 5, 4, 3, 1, 2];
 
-/// Cost of a step for one creature (`t_creature::get_move_cost`, rva `23d520`): on its
+/// Cost of a step for one creature (method of `t_creature`, rva `23d520`): on its
 /// native terrain 50 less, but never below 100.
 pub fn creature_move_cost(creature: &CreatureStats, terrain: u8) -> i32 {
     let cost = terrain_cost(terrain);
@@ -64,8 +64,8 @@ pub fn creature_move_cost(creature: &CreatureStats, terrain: u8) -> i32 {
     }
 }
 
-/// Cost of a step on `terrain` for the whole army (`t_creature_array::get_move_cost`,
-/// rva `23f960`): the slowest creature decides, then any member that helps the army
+/// Cost of a step on `terrain` for the whole army (method of
+/// `t_creature_array`, rva `23f960`): the slowest creature decides, then any member that helps the army
 /// (a hero with Pathfinding) can bring it down. Heroes don't count in the first part.
 pub fn army_move_cost(army: &Army, creatures: &[CreatureStats], terrain: u8) -> i32 {
     let slowest_creature = army
@@ -93,7 +93,7 @@ fn pathfinding(_hero: &h4_state::army::Hero) -> usize {
     0
 }
 
-/// What one member makes the army pay (`get_army_move_cost`): the terrain cost for
+/// What one member makes the army pay (a virtual method of each member): the terrain cost for
 /// creatures; for a hero, less by their Pathfinding, but not below 100 (rva `331ac0`).
 fn slot_army_move_cost(slot: &Slot, terrain: u8) -> i32 {
     let cost = terrain_cost(terrain);
@@ -113,8 +113,8 @@ pub fn army_costs(army: &Army, creatures: &[CreatureStats]) -> [i32; TERRAIN_TYP
     costs
 }
 
-/// Cost of the step from `from` to `to` (`t_adventure_path_finder::search_to`, rva
-/// `ffe39`): 75 onto a bridge; along a road (both tiles have one) 100 on dirt roads and
+/// Cost of the step from `from` to `to` (the map path
+/// search, rva `ffe39`): 75 onto a bridge; along a road (both tiles have one) 100 on dirt roads and
 /// 75 on gravel and cobblestone; otherwise the army's cost of the terrain. A diagonal
 /// step costs half as much again.
 pub fn step_cost(costs: &[i32; TERRAIN_TYPES], from: &Tile, to: &Tile, diagonal: bool) -> i32 {
@@ -136,7 +136,7 @@ pub fn step_cost(costs: &[i32; TERRAIN_TYPES], from: &Tile, to: &Tile, diagonal:
     }
 }
 
-/// Movement of one member before bonuses (`get_raw_adventure_movement`, rva `250db0`):
+/// Movement of one member before bonuses (rva `250db0`):
 /// `m * 11 / 25 + 1200`, at most 3000, where `m` is the combat movement: the creature's
 /// Move from `table.creatures` times 100, or 2400 for a hero. A creature we have no
 /// stats for counts as having 0 Move.
@@ -149,7 +149,7 @@ pub fn raw_movement(slot: &Slot, creatures: &[CreatureStats]) -> i32 {
 }
 
 /// The army-wide factor `k` that turns a member's own movement into map points
-/// (`get_adventure_movement_modifier`, rva `250df0`): `bonus / raw + multiplier`.
+/// (rva `250df0`): `bonus / raw + multiplier`.
 /// On land the bonus is 0 for creatures and heroes alike, and the multiplier is the
 /// largest of 1.0 and the heroes' Pathfinding multiplier (1.0 without the skill), so
 /// for now `k` is always 1. It is kept as a function so the formula has one place.
@@ -171,7 +171,7 @@ fn living(army: &Army) -> impl Iterator<Item = (usize, &Slot)> {
     })
 }
 
-/// Full movement of the army for a day (`get_max_movement`, rva `241a10`): the smallest
+/// Full movement of the army for a day (rva `241a10`): the smallest
 /// `raw * k`, rounded.
 pub fn max_movement(army: &Army, creatures: &[CreatureStats]) -> i32 {
     living(army)
@@ -195,7 +195,7 @@ pub fn movement_left(army: &MapArmy, creatures: &[CreatureStats]) -> i32 {
         .unwrap_or(0)
 }
 
-/// Take `cost` points from every member (`change_movement`, rva `241870`): each loses
+/// Take `cost` points from every member (rva `241870`): each loses
 /// `cost / k` of its own movement, but not below 0.
 pub fn spend_movement(army: &mut MapArmy, creatures: &[CreatureStats], cost: i32) {
     let mut left = army.movement_left;
@@ -208,7 +208,7 @@ pub fn spend_movement(army: &mut MapArmy, creatures: &[CreatureStats], cost: i32
 }
 
 /// A new day: every member gets its full movement back (its raw movement, in its own
-/// units). Not checked against the exe's `process_new_day` yet.
+/// units). Not checked against the exe's new day yet.
 pub fn refresh_movement(army: &mut MapArmy, creatures: &[CreatureStats]) {
     let mut left = [0.0; SLOTS];
     for (i, slot) in living(&army.army) {

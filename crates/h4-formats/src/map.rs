@@ -6,8 +6,8 @@
 //! "H4CAMPAIGN", u32 file version (0x16), u8 multi-scenario flag (0 here), gzip stream
 //! ```
 //!
-//! The stream is the whole map, read by the game in one pass (`t_adventure_map::read_from_map`,
-//! rva `d15c0` in our exe):
+//! The stream is the whole map, read by the game in one pass (the map reader of
+//! `t_adventure_map`, rva `d15c0` in our exe):
 //!
 //! 1. the map header ([`MapHeader`], reader at rva `37a320`): sizes, players, teams, texts;
 //! 2. events, allowed artifacts/skills/spells, AI hints and then every object on the map
@@ -127,9 +127,9 @@ pub struct Tile {
     pub subtype: u8,
     /// 0 = no road, else road type 1..=3.
     pub road: u8,
-    /// 0..=2 (`get_rock_terrain_type`).
+    /// 0..=2: the rock (cliff) terrain of the tile.
     pub rock_terrain: u8,
-    /// `has_rock_terrain_transition`.
+    /// The tile has a rock terrain transition.
     pub rock_transition: bool,
     /// Six 3-bit fields plus bit 19 (the default is 0x80000). Probably per-player visibility.
     pub visibility: u32,
@@ -143,9 +143,9 @@ pub struct Tile {
 pub struct TerrainTransition {
     pub terrain: u8,
     pub subtype: u8,
-    /// 9 bits; which mask (`get_id`).
+    /// 9 bits; which mask.
     pub id: u16,
-    /// 5 bits; which mask set (`get_mask_set`).
+    /// 5 bits; which mask set.
     pub mask_set: u8,
 }
 
@@ -376,7 +376,7 @@ fn read_cut_scene(r: &mut Reader) -> Result<CutScene> {
 /// Which columns of each row are inside the map, as `start..end`.
 ///
 /// The map is a diamond inside the `size` x `size` square: the top and bottom rows hold two
-/// tiles, the middle rows all of them. This ports `t_isometric_map_base_base::base_initialize`
+/// tiles, the middle rows all of them. This ports the row layout of `t_isometric_map_base_base`
 /// (rva `34db60`), called with a view of `size*h` x `size*h/2` pixels; `h` cancels out, so we
 /// use 64. Integer division truncates toward zero, as in C.
 pub fn row_ranges(size: usize) -> Vec<(usize, usize)> {
