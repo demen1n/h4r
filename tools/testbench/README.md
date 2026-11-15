@@ -267,3 +267,25 @@ Effects are absent; text formatting, the floating damage text (arguments recorde
 label refresh and `clear_influence` are stubbed. Poison, spell shields, luck, the
 martyr redirect and the death sequence are excluded.
 See `decomp/apply_damage.md` and `cargo test -p h4-rules --test apply_damage_vectors`.
+
+## Melee attack order and retaliation flag
+
+```sh
+.venv/bin/python tools/testbench/melee_attack.py --exe bin/heroes4.exe \
+  --out crates/h4-rules/tests/melee_attack_vectors.tsv
+```
+
+6,936 cases (see `decomp/melee_attack.md`): number of attacks `1f1d10`
+(melee/ranged, effects 0x7a/0x82, four abilities, shot caps); `set_retaliated`
+`1f6b20` with the native time stamp getter `177db0`; flag clearing `1f6b60`;
+the retaliation block of the round reset (`1ed09b..1ed0c3`); and
+`t_battlefield::begin_attack` `16ede0` whole over can-retaliate, first strike and
+immunity on both sides, strikes twice, unlimited retaliation, a stunned or dead
+target, both `+0x38` slots, moved 3/4 and the return flag. The continuation
+handlers it binds are built by native code and then invoked through their own
+vtables, so the bench observes the bound `end_melee_attack` /
+`begin_melee_retaliation` arguments. Stubs are boundaries only: the animated
+strike `16e520` (recorded), the queue push `175a70` (recorded), the priority
+`1f2cc0` (verified separately by `initiative.py`), `dynamic_cast`, the
+`resolve_attacks` handler and fixture accessors.
+
