@@ -595,3 +595,60 @@ fn heroes_and_unknown_units_cannot_take_damage_yet() {
     assert!(state.add_damage(UnitId(999), 10, false).is_err());
     assert_eq!(state, before);
 }
+
+#[test]
+fn damage_rolls_through_the_battle_are_logged_and_replayable() {
+    use h4_rules::damage::{attack_hit, Attacker, Defender, HitOptions, School};
+    use h4_rules::random::CombatRandom;
+
+    let mut state = battle();
+    let ids = deploy_both(&mut state);
+    let attacker = Attacker {
+        id: ids[0].0,
+        number: 12,
+        damage_low: 1,
+        damage_high: 3,
+        offense: 4.0,
+        defense_reduction: 1.0,
+        school: School::Order,
+        abilities: vec![],
+        giant_bonus_effect: false,
+    };
+    let defender = Defender {
+        id: ids[1].0,
+        defense_basic: 5.0,
+        defense_bonus: 1.0,
+        abilities: vec![],
+        warded_against: vec![],
+        giant: false,
+        total_hit_points: 120,
+    };
+    let options = HitOptions::default();
+    let events_before = state.events().len();
+
+    // The battle is the dice: rolls go through `BattleState::roll`.
+    let damage = attack_hit(&attacker, &defender, &options, &mut state, &mut Vec::new());
+
+    // The same hit with the bare generator gives the same damage. Our battle uses
+    // modulus = largest unit ID + 1 (a local convention, see `BattleState::from_armies`).
+    let modulus = state.units().iter().map(|u| u.id.0).max().unwrap() + 1;
+    let mut bare = CombatRandom::new(1234, modulus);
+    assert_eq!(damage, attack_hit(&attacker, &defender, &options, &mut bare, &mut Vec::new()));
+
+    // A stack of 12 rolls ten times (stacks of 10+ roll ten dice and scale), each logged
+    // with the target first, the attacker second and purpose 0.
+    let rolls: Vec<_> = state.events()[events_before..].iter().collect();
+    assert_eq!(rolls.len(), 10);
+    for event in rolls {
+        assert!(matches!(event, CombatEvent::Rolled { first, second, purpose: 0, .. }
+            if *first == ids[1].0 && *second == ids[0].0));
+    }
+
+    // The log replays on load, and the next hit continues identically.
+    let mut restored = BattleState::from_json(&state.to_json().unwrap()).unwrap();
+    assert_eq!(restored, state);
+    let next = attack_hit(&attacker, &defender, &options, &mut state, &mut Vec::new());
+    let again = attack_hit(&attacker, &defender, &options, &mut restored, &mut Vec::new());
+    assert_eq!(next, again);
+    assert_eq!(restored, state);
+}

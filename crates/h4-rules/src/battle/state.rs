@@ -19,7 +19,7 @@ use super::wounds;
 use super::Side;
 use crate::battlefield::{BattlefieldGrid, CellOccupant, CombatFootprint, PlacedObstacle};
 use crate::creatures::CreatureStats;
-use crate::random::CombatRandom;
+use crate::random::{CombatDice, CombatRandom};
 
 /// Version of our JSON fixture, not the original game's saved-battle format.
 pub const SNAPSHOT_VERSION: u32 = 3;
@@ -1213,5 +1213,16 @@ impl BattleState {
             }
         }
         Ok(())
+    }
+}
+
+/// A battle is a source of dice for the rules (`damage::attack_hit` and the rest): every
+/// roll goes through [`BattleState::roll`], so it lands in the battle log and a saved
+/// battle can be replayed. Rules called during a battle should get the `BattleState`,
+/// never its bare generator.
+impl CombatDice for BattleState {
+    fn roll(&mut self, first: u32, second: u32, purpose: u32) -> u32 {
+        // The inherent `BattleState::roll` above, not this trait method again.
+        BattleState::roll(self, first, second, purpose)
     }
 }

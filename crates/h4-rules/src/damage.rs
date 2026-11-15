@@ -19,7 +19,7 @@
 //! (`re/enum_creature_ability.tsv`, read from the exe's keyword table), because the checks
 //! in the exe are by number.
 
-use crate::random::CombatRandom;
+use crate::random::CombatDice;
 
 /// Ability numbers the damage and effect rules check. The names are the game's keywords.
 pub mod ability {
@@ -164,7 +164,7 @@ pub fn average_base_damage(attacker: &Attacker) -> i32 {
 /// The real base damage (rva `1ee240`): each creature of the stack rolls
 /// `low + roll % (high - low + 1)`. Stacks of 10 or more roll ten times and scale the sum
 /// by `number / 10`, so a stack of 1000 doesn't need 1000 rolls.
-pub fn roll_base_damage(attacker: &Attacker, target_id: u32, dice: &mut CombatRandom) -> i32 {
+pub fn roll_base_damage(attacker: &Attacker, target_id: u32, dice: &mut impl CombatDice) -> i32 {
     let range = attacker.damage_high - attacker.damage_low + 1;
     let mut roll_one = || {
         // purpose 0 = damage roll; the first id is the target, the second the attacker
@@ -407,12 +407,15 @@ impl Default for HitOptions {
 /// ([`modify_damage`]), last step ([`finalize_attack_damage`]). All dice come from the one
 /// battle generator, so the order of the calls matters for the next roll too.
 ///
+/// `dice` is any [`CombatDice`]: in a real battle pass the `BattleState`, which logs every
+/// roll; a bare `CombatRandom` is for exe vectors and tests.
+///
 /// Not here (the caller's job): range and obstacle penalties, rolling for luck.
 pub fn attack_hit(
     attacker: &Attacker,
     defender: &Defender,
     options: &HitOptions,
-    dice: &mut CombatRandom,
+    dice: &mut impl CombatDice,
     log: &mut Vec<DamageEvent>,
 ) -> i32 {
     let base = roll_base_damage(attacker, defender.id, dice);
@@ -465,7 +468,7 @@ pub fn melee_hit(
     moved: i32,
     luck: Luck,
     luck_multiplier: f64,
-    dice: &mut CombatRandom,
+    dice: &mut impl CombatDice,
     log: &mut Vec<DamageEvent>,
 ) -> i32 {
     attack_hit(attacker, defender, &HitOptions { moved, luck, luck_multiplier,
@@ -475,6 +478,7 @@ pub fn melee_hit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::random::CombatRandom;
 
     fn orc() -> Attacker {
         // an orc from table.creatures: damage 1-3, attack 11
