@@ -349,10 +349,12 @@ pub enum MoveError {
 
 /// Walk army `id` along `path` as far as its movement goes.
 ///
-/// A step can always be made while there is any movement left, even if it costs more
-/// than that; it then uses up all of it (`decomp/movement.md`). The walk ends early at an
-/// enemy army ([`MoveEvent::Attack`]), at something in the way, or when movement runs
-/// out.
+/// A step is made only if it costs no more than the movement left, and attacking an
+/// army on the next tile needs the same: with 50 points left a step of 100 is not made,
+/// and with nothing left there is no attack (`decomp/movement.md`, "Ходьба"). This is
+/// the rule for players' (and the AI's) armies; the original lets neutral monsters that
+/// chase someone ignore it, which isn't modelled yet. The walk ends early at an enemy
+/// army ([`MoveEvent::Attack`]), at something in the way, or when movement runs out.
 pub fn move_army(state: &mut GameState, id: ArmyId, path: &[Pos], creatures: &[CreatureStats]) -> Result<Vec<MoveEvent>, MoveError> {
     let mut events = Vec::new();
     let costs = army_costs(&state.army(id).ok_or(MoveError::NoSuchArmy(id))?.army, creatures);
@@ -363,24 +365,24 @@ pub fn move_army(state: &mut GameState, id: ArmyId, path: &[Pos], creatures: &[C
         if next.level != here.level || dr.abs() > 1 || dc.abs() > 1 || (dr, dc) == (0, 0) {
             return Err(MoveError::NotAdjacent { from: here, to: next });
         }
-        match obstacle(state, army, next) {
-            Obstacle::None => {}
-            Obstacle::Enemy(defender) => {
-                events.push(MoveEvent::Attack { defender });
-                break;
-            }
-            Obstacle::Impassable | Obstacle::Friend(_) => {
-                events.push(MoveEvent::Blocked { at: next });
-                break;
-            }
-        }
-        if movement_left(army, creatures) <= 0 {
-            events.push(MoveEvent::OutOfMovement { at: next });
+        let what = obstacle(state, army, next);
+        if matches!(what, Obstacle::Impassable | Obstacle::Friend(_)) {
+            events.push(MoveEvent::Blocked { at: next });
             break;
         }
+        // The original checks the points before the step or the attack: the step (or
+        // the attack) happens only if its cost fits into what is left.
         let from_tile = state.map.tile(here).copied().unwrap_or(Tile::EMPTY);
         let to_tile = state.map.tile(next).copied().expect("obstacle() checked it is on the map");
         let cost = step_cost(&costs, &from_tile, &to_tile, dr != 0 && dc != 0);
+        if cost > movement_left(army, creatures) {
+            events.push(MoveEvent::OutOfMovement { at: next });
+            break;
+        }
+        if let Obstacle::Enemy(defender) = what {
+            events.push(MoveEvent::Attack { defender });
+            break;
+        }
         let army = state.army_mut(id).expect("looked up above");
         spend_movement(army, creatures, cost);
         army.at = next;
@@ -495,11 +497,11 @@ mod tests {
     }
 
     #[test]
-    fn last_step_uses_up_what_is_left() {
+    fn a_step_needs_its_full_cost() {
         let stats = vec![creature(0, 3)]; // raw movement 1200
         let (mut g, id) = game_with(Army::of(&[Stack { creature: 0, count: 1 }]));
         refresh_movement(g.army_mut(id).unwrap(), &stats);
-        // back and forth between two grass tiles, 100 a step
+        // back and forth between two grass tiles, 100 a step: exactly 12 steps fit
         let back_and_forth: Vec<Pos> =
             (0..20).map(|i| Pos { level: 0, row: 5, col: if i % 2 == 0 { 6 } else { 5 } }).collect();
         let events = move_army(&mut g, id, &back_and_forth, &stats).unwrap();
@@ -508,14 +510,39 @@ mod tests {
         assert!(matches!(events.last(), Some(MoveEvent::OutOfMovement { .. })));
         assert_eq!(movement_left(g.army(id).unwrap(), &stats), 0);
 
-        // with 50 left a step of 100 can still be made, and it takes the rest
+        // with 150 left a step of 100 is made, the next one isn't: 50 stay unused
         refresh_movement(g.army_mut(id).unwrap(), &stats);
-        spend_movement(g.army_mut(id).unwrap(), &stats, 1150);
+        spend_movement(g.army_mut(id).unwrap(), &stats, 1050);
         let here = g.army(id).unwrap().at;
         let two = [Pos { col: here.col + 1, ..here }, Pos { col: here.col + 2, ..here }];
         let events = move_army(&mut g, id, &two, &stats).unwrap();
-        assert_eq!(events[0], MoveEvent::Stepped { to: two[0], cost: 100 });
-        assert_eq!(events[1], MoveEvent::OutOfMovement { at: two[1] });
+        assert_eq!(events, [MoveEvent::Stepped { to: two[0], cost: 100 }, MoveEvent::OutOfMovement { at: two[1] }]);
+        assert_eq!(movement_left(g.army(id).unwrap(), &stats), 50);
+    }
+
+    #[test]
+    fn attacking_needs_movement_too() {
+        let stats = vec![creature(0, 3)]; // raw movement 1200
+        let (mut g, id) = game_with(Army::of(&[Stack { creature: 0, count: 1 }]));
+        let next = Pos { level: 0, row: 5, col: 6 };
+        let monster = g.add_army(None, next, Army::of(&[Stack { creature: 0, count: 9 }]));
+
+        // nothing left: no attack (the issue #79 case)
+        let events = move_army(&mut g, id, &[next], &stats).unwrap();
+        assert_eq!(events, [MoveEvent::OutOfMovement { at: next }]);
+
+        // less than the step costs: still no attack
+        refresh_movement(g.army_mut(id).unwrap(), &stats);
+        spend_movement(g.army_mut(id).unwrap(), &stats, 1150);
+        let events = move_army(&mut g, id, &[next], &stats).unwrap();
+        assert_eq!(events, [MoveEvent::OutOfMovement { at: next }]);
+
+        // exactly the cost of the step: the attack happens, and the army stays put
+        refresh_movement(g.army_mut(id).unwrap(), &stats);
+        spend_movement(g.army_mut(id).unwrap(), &stats, 1100);
+        let events = move_army(&mut g, id, &[next], &stats).unwrap();
+        assert_eq!(events, [MoveEvent::Attack { defender: monster }]);
+        assert_eq!(g.army(id).unwrap().at, Pos { level: 0, row: 5, col: 5 });
     }
 
     #[test]
