@@ -289,3 +289,19 @@ strike `16e520` (recorded), the queue push `175a70` (recorded), the priority
 `1f2cc0` (verified separately by `initiative.py`), `dynamic_cast`, the
 `resolve_attacks` handler and fixture accessors.
 
+## Retaliation checks
+
+```sh
+.venv/bin/python tools/testbench/retaliation.py --exe bin/heroes4.exe \
+  --out crates/h4-rules/tests/retaliation_vectors.tsv
+```
+
+4,490 cases of `t_combat_creature::can_retaliate` (`1f23c0`), executed whole with
+the native `can_shoot` (`170780`), footprint centers, x87 distance and `__ftol`:
+the retaliated flag against `n`, effects 0xba/0x9a and their strength fields,
+ranged retaliation (ability, effect 0x2f, shots, threat count), melee reach with
+`long_weapon` on either side over sizes 1-3 and exact positions, and the
+`no_retaliation` / effect 0x24 / `panic` / `death_protection` branch. Stubs are
+the ability/effect/size accessors, the effect eligibility answer `1b6120` and the
+threat map lookup `10d200`.
+
