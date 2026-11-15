@@ -52,6 +52,29 @@ impl GlobalRandom {
     }
 }
 
+/// Anything a battle roll can come from.
+///
+/// Rules that roll dice (damage, luck, ...) ask for "a source of battle rolls" instead of a
+/// concrete generator. Two sources exist:
+///
+/// - [`CombatRandom`] itself: the bare generator, handy for exe vectors and small tests;
+/// - `BattleState` (in `battle::state`): the same generator, but every roll is also written
+///   to the battle log, so a saved battle can be replayed and checked. A real battle must
+///   roll through it.
+///
+/// Both give the same numbers for the same seed and the same sequence of rolls.
+pub trait CombatDice {
+    /// A number in 0..=32767 for this (first, second, purpose) roll; see [`CombatRandom::roll`].
+    fn roll(&mut self, first: u32, second: u32, purpose: u32) -> u32;
+}
+
+impl CombatDice for CombatRandom {
+    fn roll(&mut self, first: u32, second: u32, purpose: u32) -> u32 {
+        // Calls the inherent method below (Rust prefers it over the trait method).
+        CombatRandom::roll(self, first, second, purpose)
+    }
+}
+
 /// How many states apart the remembered checkpoints are (the game uses the same spacing).
 const CHECKPOINT_STEP: u32 = 128;
 
