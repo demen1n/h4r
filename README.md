@@ -222,6 +222,8 @@ Further documentation is currently mostly in Russian:
 
 ## Contributing
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, validation, PR guidance, and what must stay local.
+
 If you care about Heroes IV and want to help keep it playable, you are welcome here. You do not need to be a Rust developer to contribute.
 
 - **Code and review:** improve the implementation, investigate bugs, or review existing readers and rules.
