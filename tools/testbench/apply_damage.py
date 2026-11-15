@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Record Buka 3.0 reference vectors for applying damage to a stack.
 
-Executes t_combat_creature::resolve_damage (1eee40) and ::kill (1f3860) whole,
-and the pending-damage cap of ::add_damage (block 1f2a91..1f2ab8).
+Executes two t_combat_creature methods whole: pending damage to losses (1eee40)
+and killing N creatures (1f3860); and the pending-damage cap of the damage intake
+(block 1f2a91..1f2ab8).
 Fixture inputs: number, wounds, pending damage, hit points (virtual +0x30),
 the permanent-death flag and counter, total hits (virtual +0x2c).
 Stubbed: effect lookups (always absent), text formatting, the floating damage
-text (its arguments are recorded), animation refresh, clear_influence.
+text (its arguments are recorded), animation refresh, clearing the influence.
 Spell shields (effects 0x10, 0x44), poison (0x6f), luck and the martyr
-redirect inside add_damage are excluded.
+redirect inside the damage intake are excluded.
 """
 import argparse
 import importlib.util
@@ -29,9 +30,9 @@ SENTINEL = 0x7777      # "last killed" before the call: shows whether it was wri
 # address -> bytes of stack arguments the callee pops
 STUBS = {
     0x71d190: 0,   # format a number into a string (cdecl, varargs)
-    0x566010: 12,  # t_battlefield::add_damage_text(creature, damage, killed)
+    0x566010: 12,  # floating damage text (creature, damage, killed)
     0x563850: 4,   # refresh the stack's number label
-    0x5f16a0: 0,   # t_combat_creature::clear_influence
+    0x5f16a0: 0,   # clear the stack's influence
     0x5f4ad0: 0,   # ability 0x35 follow-up
     0x5f1f80: 8,   # remove an effect
 }
@@ -46,12 +47,12 @@ class Bench:
         self.obj = self.heap + 0x3000
         self.table, self.vbtable, self.effects = self.heap + 0x1000, self.heap + 0x1200, self.heap + 0x1300
         code = self.heap + 0x1400
-        # get_hit_points: ECX is object+0x98
+        # hit points of one creature: ECX is object+0x98
         self.uc.mem_write(code, b'\x8b\x81' + struct.pack('<I', HP - 0x98) + b'\xc3')
         self.o.word(self.table + 0x30, code)
         self.o.word(self.vbtable + 8, VBASE)
         self.o.word(self.effects + 8, self.o.accessor(31, 0))  # no effect is present
-        # the attackable-object vtable used by add_damage: +0x2c get_total_hits
+        # the attackable-object vtable used by the damage intake: +0x2c total hit points
         self.attackable = self.heap + 0x1600
         self.text = None
         self.cleared = False

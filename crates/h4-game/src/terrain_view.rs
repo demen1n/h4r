@@ -488,7 +488,7 @@ impl TerrainView {
 }
 
 /// Light of a slope between two neighbouring vertices of a row, in 1/32768 (32768 = as
-/// is): `compute_edge_light`, rva `14230` (`decomp/heights.md`). `a` is the vertex with
+/// is): rva `14230` (`decomp/heights.md`). `a` is the vertex with
 /// the smaller column. The light falls from the side of larger columns (the screen's lower
 /// right) at 45°: a slope down towards it is brighter, one up towards it darker. Brightness
 /// falls off linearly with the angle between the slope and the light, down to 1/6.
@@ -510,7 +510,7 @@ fn edge_light(a: i32, b: i32) -> i32 {
     0x1555 + (x * 54614.0 / (PI / 2.0)).round() as i32
 }
 
-/// Light of a vertex: `compute_vertex_light`, rva `6820`. The mean of the slopes to its
+/// Light of a vertex: rva `6820`. The mean of the slopes to its
 /// neighbours in the same row of vertices (columns ±1); at the ends of a row, the one slope
 /// there is. Only the row direction counts.
 fn vertex_light(map: &MapFile, level: usize, row: i32, col: i32) -> i32 {

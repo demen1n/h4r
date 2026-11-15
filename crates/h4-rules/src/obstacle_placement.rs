@@ -223,7 +223,7 @@ pub struct PlacerContext {
 pub struct SiegeLayout {
     /// Rows below this belong to the castle (`battlefield+100`): no obstacles there.
     pub castle_x: i32,
-    /// Gate cell (`t_battlefield::get_gate_position`, RVA 177bc0); only `y` is used.
+    /// Gate cell (RVA 177bc0); only `y` is used.
     pub gate: (i32, i32),
 }
 
@@ -372,7 +372,7 @@ impl<'a> Placer<'a> {
         }
     }
 
-    /// `clear_start_positions` (RVA 209190).
+    /// Clear the armies' start positions (RVA 209190).
     fn clear_start_positions(&mut self) {
         for side in 0..2 {
             // In a siege the defenders stand inside the castle.

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Record Buka 3.0 reference vectors for can_retaliate and can_shoot.
+"""Record Buka 3.0 reference vectors for the retaliation and "can shoot" checks.
 
-Executes t_combat_creature::can_retaliate (1f23c0) whole, including the real
-t_battlefield::can_shoot (170780), footprint centers (f100, 28c60), the x87
+Executes the retaliation check of t_combat_creature (1f23c0) whole, including the
+real "can shoot" check of t_battlefield (170780), footprint centers (f100, 28c60), the x87
 distance and __ftol. Fixture boundaries: abilities and effects (virtual lookups),
 footprint size (virtual +8), the effect eligibility check 1b6120 (a supplied
 answer per spell; ported separately in part, decomp/damage.md) and the

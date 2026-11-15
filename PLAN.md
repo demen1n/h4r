@@ -84,7 +84,7 @@ The stage is closed when every resource in the archives reads without errors and
 | `strings.*`, `bitmap_raw`, remaining fonts | 5 + 3 + 21 | interface texts, menu backgrounds, labels | stage 6 |
 | sound (PCM/MP3), Bink video | 1028 sounds, videos | sound is already understood; Bink via a ready-made decoder or ffmpeg | stage 9 |
 
-The method is the same as before: look at the bytes, find the reading function in the debug map, decompile it, write a reader in `h4-formats` and run it over all files of that type.
+The method is the same as before: look at the bytes, find the function that reads it in the exe (by cross-references and RTTI), decompile it, write a reader in `h4-formats` and run it over all files of that type.
 
 A format counts as worked out at one of three levels, and the registry records the level reached:
 
@@ -105,7 +105,7 @@ The result of the stage is a map that can't be told apart from the original in a
 3. Roads and rivers through their mask sets.
 4. Fix the questionable parts of transitions: stair-stepped shallows, mask variant selection. The source of truth is the decompiled `transition_calculator.cpp`.
 5. The underground level and switching between levels.
-6. Fog of war: the game has its own masks (`t_shroud_transition_calculator`).
+6. Fog of war: the game has its own masks.
 7. Object animations (windmills, whirlpools), player flags on objects and heroes.
 8. Hero path arrows, cursors, the minimap.
 9. Relief: lighting and elevation of terrain, objects and armies from vertex heights (`decomp/heights.md`).
@@ -128,7 +128,7 @@ The result: any of the 106 installed maps opens and is shown in full: terrain, o
 
 1. Header: `H4CAMPAIGN` + gzip (already known), then description, sizes, players, victory conditions.
 2. Decompile `t_adventure_map::read` and all the `read` functions it calls. Versioning matters: fields were added from version to version (base game, Gathering Storm, Winds of War).
-3. Tiles (`t_abstract_tile::read`): terrain type + subtype, roads, rivers, transitions, height.
+3. Tiles: terrain type + subtype, roads, rivers, transitions, height.
 4. Objects: ~70 `t_adv_*` classes, each with its own `read`. We start with simple ones (decorations, resources); complex ones (towns, scripted objects) come last.
 5. Map scripts (~120 `t_script_*` classes) are only read and skipped at this stage, and executed at stage 8.
 6. Test: all 106 maps read to the last byte, as animations do now. This is necessary but not sufficient: we also check the meaning (map sizes match the declared ones, object coordinates are inside the map, resource references exist) and verify the display against the original.
@@ -208,7 +208,7 @@ Window layouts, judging by the names (`layers.dialog.*`), are in the data, so el
 
 The result: the computer plays as it does in the original, with all its strengths and weaknesses. This is the one part that can't be restored from observation, only from the code.
 
-1. **Combat AI** (`combat_ai.cpp`): the set of actions is already known from the classes (`t_combat_ai_melee_action`, `_ranged_*`, `_spell_*`, `_move_`, `_wait_`, `_defend_`). We need their scores and weights, including spell values (`get_damage_spell_value` and the like). We start with it: it's smaller and immediately gives playable combat against the computer.
+1. **Combat AI** (`combat_ai.cpp`): the set of actions is already known from the classes (`t_combat_ai_melee_action`, `_ranged_*`, `_spell_*`, `_move_`, `_wait_`, `_defend_`). We need their scores and weights, including spell values. We start with it: it's smaller and immediately gives playable combat against the computer.
 2. **Strategic AI** (`adventure_ai.cpp`): the value of objects and goals, threat assessment, hero routes, building and recruiting in towns. The biggest and most tangled piece of code.
 3. AI helpers: `t_ai_army_data_cache`, battle simulation for strength estimates (`t_simulated_combat_creature`), spell weights from the AI columns in `table.Spells`.
 
@@ -313,7 +313,7 @@ Not part of 1.0 and not blocking it: multiplayer, the map editor, mods, importin
 
 Precautions:
 
-- the public repository doesn't get game resources, its binaries, decompiled code or anything taken from the leaked map file (`extracted/`, `bin/`, `ghidra/`, `decomp/*.c`, `third_party/`); names from the map file are used for understanding, and in our own code things get our own names;
+- the public repository doesn't get game resources, its binaries, decompiled code or anything taken from the leaked map file (`extracted/`, `bin/`, `ghidra/`, `decomp/*.c`, `third_party/`); the map file is only a local hint where to look: its names are not published (code is named by meaning, notes use RVAs and our own descriptions; see `CONTRIBUTING.md`);
 - the origin of technical findings is documented (`CLAUDE.md`, `decomp/*.md`, `FORMATS.md`): how a format or formula is known;
 - the license for our own code and documentation was chosen on 31 October 2026: GPL-3.0-or-later (`LICENSE`, `LICENSING.md`); the dependency check is recorded in `THIRD_PARTY.md`;
 - before publication, separately decide: rules for outside contributions, distribution of ready-made builds, use of the name "Heroes of Might and Magic" and the trademarks.
@@ -375,7 +375,7 @@ Real maps, the state model, the vertical slice and the minimal testbench already
 - [x] Metatile offsets as in the game: 4×4 block mosaic from the header's `terrain_seed` (`t_metatile_map`, rva `395400`; `h4-game/src/mosaic.rs`); not yet compared visually with the original
 - [ ] Verify against the game: river passability, hero sorting against object depth columns; what the game does with empty map armies (108 of them, e.g. "Three Queens" (39,29)) and armies on objects ("Final Grounds", skeletons)
 - [x] Terrain shading from heights by the exe's formula (`decomp/heights.md`, `shade_by_height`); stretching the light across a tile is our guess (linear over two triangles); compared by eye with the starts of «Земли наших пращуров»
-- [x] Elevation of terrain, objects and armies from heights (`decomp/heights.md`, `h4-game/src/relief.rs`); map heights are terrain only. Compared by eye with the starts of «Земли наших пращуров». Remaining: bridges ("bridge height"), the tile flag in `compute_height`, verifying against the game how a hero rises while walking and whether the draw order accounts for height
+- [x] Elevation of terrain, objects and armies from heights (`decomp/heights.md`, `h4-game/src/relief.rs`); map heights are terrain only. Compared by eye with the starts of «Земли наших пращуров». Remaining: bridges ("bridge height"), the tile flag in the object height, verifying against the game how a hero rises while walking and whether the draw order accounts for height
 - [ ] Some spruces on "Beebee" (near the barrel house at the start) are drawn semi-transparent; verify against the game
 - [ ] Choosing who plays which color at map start (currently every playable color is a human and the rest skip their turn)
 - [ ] Music and footstep sounds in the prototype: cheap and brings it to life, if it doesn't slow the critical path

@@ -1,8 +1,8 @@
 //! What the random objects of a map become when a game starts: random towns get a faction,
 //! random monsters a creature and a stack size, random resource piles a resource...
 //!
-//! How the game does it (`t_adventure_map::read_from_map`, rva `d15c0`, right after the
-//! tiles are read):
+//! How the game does it (the map reader of `t_adventure_map`, rva `d15c0`, right after
+//! the tiles are read):
 //!
 //! 1. "Pre-placement": every object, in the order of the map file, gets `preplacement(map, 0)`
 //!    (vtable slot 29). Random towns, dwellings, shrines and temples choose their kind here.
@@ -10,7 +10,7 @@
 //! 2. The put-aside objects are asked again with pass 1, 2, ... until none is left; by then
 //!    every town has its type. Armies with heroes always wait for pass 1: that is when a
 //!    hero the map leaves random gets its class and gender (`t_hero::preplacement`, rva
-//!    `330e90`, calls `derandomize`, rva `3311f0`).
+//!    `330e90`, which picks a random hero, rva `3311f0`).
 //! 3. "Placement": every object, in file order, gets `place(map, point)` (slot 28). A random
 //!    object creates the real one on its spot here: a pile of a random resource, a monster
 //!    army, an artifact.
@@ -367,7 +367,7 @@ impl State<'_> {
     }
 
     /// The heroes of an army get a class and gender if the map leaves them random
-    /// (`t_hero::derandomize`, rva `3311f0`). Only heroes without a portrait (-1) are
+    /// (a `t_hero` method, rva `3311f0`). Only heroes without a portrait (-1) are
     /// touched: a random class is a random base class of the owner's alignment (any of the
     /// eleven without an owner), a random gender a coin flip. Then the game picks one of
     /// its standard heroes of that class and gender for name and portrait, one more roll.

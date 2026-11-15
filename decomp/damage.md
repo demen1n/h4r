@@ -1,32 +1,32 @@
 # Урон в бою (heroes4.exe rus-3.0)
 
-Сырой декомпилят: `damage.c`. Имена `t_combat_creature::*` перенесены с complete-3.0 (tier D, но
-сигнатуры и `ret N` совпадают, поведение кода им соответствует). `FUN_*` — без имени; ниже
-предполагаемые роли. Способности — `re/enum_creature_ability.tsv`.
+Сырой декомпилят: `damage.c` (не в git). Функции — методы `t_combat_creature` (RTTI) и
+свободные функции; названия ниже — наши, по поведению кода. `FUN_*` — адреса Ghidra без
+названия. Способности — `re/enum_creature_ability.tsv`.
 
-## get_melee_damage(target, count = -1) — rva 1ee4d0
+## Средний урон в ближнем бою (цель, число = −1) — rva 1ee4d0
 
 ```
-count = count < 0 ? creature.get_number() : count
+count = count < 0 ? число существ : count
 base  = (damage_low + damage_high) * this->number / 2      // среднее × размер стека
 dmg   = modify_damage(base, target, ranged=false, count)   // FUN_005edf30
 return finalize_damage(number, target, dmg)                // FUN_005ee540
 ```
 
-## get_ranged_damage(target, ...) — rva 1eebf0
+## Средний урон выстрела (цель, ...) — rva 1eebf0
 
-Только при `has_ability(ranged)` и оставшихся выстрелах:
+Только при способности `ranged` и оставшихся выстрелах:
 ```
 n    = shooters_alive(target)            // FUN_005ee400: учитывает уже полученный урон
 base = (low + high) * n / 2
 dmg  = modify_damage(base, target, ranged=true)
-dmg /= max(1, range_penalty(target))     // FUN_00570800 -> t_abstract_creature::get_range_effect(дистанция до края)
+dmg /= max(1, range_penalty(target))     // rva 170800 -> штраф дальности по расстоянию до края (rva у t_abstract_creature)
 return finalize_damage(n, target, dmg)
 ```
 
 ## Настоящий бросок — rva 1ee240 (имени нет)
 
-`get_melee_damage` выше — это среднее (для ИИ и подсказки). Настоящий удар бросает кости
+Средний урон выше — для ИИ и подсказки. Настоящий удар бросает кости
 генератором боя (`decomp/random.md`, назначение 0, ключ — id цели и атакующего):
 ```
 range = high - low + 1
@@ -36,8 +36,8 @@ return modify_damage(sum, target, ranged, moved, luck)
 ```
 Рядом: rva 1ee380 — `modify_damage(high * number, ...)` (максимум), 1ee3c0 — `low * number` (минимум).
 Слоты vftable атакующего (`this+0x98`, проверено по vftable `t_hero` и `t_combat_creature`):
-`+0x20` high, `+0x24` low, `+0x28` get_defense_reduction(bool), `+0x30` hit points,
-`+0x34` get_luck, `+0x44` get_offense(bool), `+0x68` has_ability.
+`+0x20` high, `+0x24` low, `+0x28` снижение защиты цели (bool), `+0x30` hit points,
+`+0x34` удача, `+0x44` атака (bool), `+0x68` «есть способность».
 
 ## modify_damage — FUN_005edf30 (rva 1edf30)
 
@@ -51,7 +51,7 @@ return modify_damage(sum, target, ranged, moved, luck)
 3. **Удача**: множитель `m = {1.0, 1.25, 1.5, 2.0}[obj->[+0x60]]`, `obj = [this+0xa18]`
    (таблица double по VA 0x97cb68, rva 17b8f0). luck 1: `dmg = trunc(m * dmg)`,
    luck 2: `dmg = trunc(dmg / m)`.
-4. `ratio = get_damage_modifier(...)`, `dmg = trunc(ratio * dmg)`.
+4. `ratio = коэффициент атаки к защите (250a60)`, `dmg = trunc(ratio * dmg)`.
 5. Оберег по школе атакующего (слот `+4`: 0 life — способность 0x22 или эффект 0x77;
    1 order — 0x79; 2 death — эффект 0x76 или способность 0x10; 3 chaos — 0x75 или 0x0a;
    4 nature — 0x78; might — нет): `dmg = dmg * 100 / 150`.
@@ -59,11 +59,11 @@ return modify_damage(sum, target, ranged, moved, luck)
    против fire_resistance: `dmg >>= 1`. cold_attack против cold_resistance: `dmg >>= 1`.
 7. Не меньше 1.
 
-## get_damage_modifier — rva 250a60 (подробно)
+## Коэффициент атаки к защите — rva 250a60 (подробно)
 
 ```
 bonus = target.has_defense[+4](ranged)    // множитель защиты
-red   = this[+0x28](ranged)               // get_defense_reduction
+red   = this[+0x28](ranged)               // снижение защиты цели
 if red <= bonus: offense *= red
 else if bonus > 1: bonus = 1
 ratio = offense / (target.has_defense[+8](ranged) * bonus)   // +8 — базовая защита
@@ -251,7 +251,7 @@ base=6/offense=5/defense=6 → 4 вместо 5. Теперь внутренни
 порядок аргументов и ветвление проверены дизассемблером. В фикстуре
 виртуальный слот цели +0x7c возвращает заданное сопротивление, а слоты
 способностей и эффектов читают массивы входных id. `1b5750` исполняет
-настоящий `is_hostile` (`00cd80`), проверку сторон и флагов.
+настоящую проверку враждебности (`00cd80`), проверку сторон и флагов.
 Функции фильтров и `464ec0` исполняются оригинальным машинным кодом;
 заглушки готового результата допустимости для этих четырёх функций нет.
 

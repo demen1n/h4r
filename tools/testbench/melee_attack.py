@@ -3,20 +3,20 @@
 
 Executes, from the original image:
 - number of attacks 1f1d10 (melee and ranged);
-- set_retaliated 1f6b20 with the real time stamp getter 177db0;
+- marking a stack as retaliated 1f6b20 with the real time stamp getter 177db0;
 - retaliation flag clearing 1f6b60;
 - the retaliation block of the round reset 1ecfb0 (1ed09b..1ed0c3);
-- t_battlefield::begin_attack 16ede0 whole, including the real handler binding
+- the start of a melee attack (a t_battlefield method) 16ede0 whole, including the real handler binding
   (17f5b0/17f610/154df0, 17f7f0/17f850) and the real "can act" check 155ea0.
   The queued continuation handlers are then invoked through their own vtables,
-  so the bound arguments of end_melee_attack / begin_melee_retaliation are observed.
+  so the bound arguments of after_strike / delayed_retaliation are observed.
 
 Fixture boundaries (stubs that only record or return supplied values):
-begin_melee_attack 16e520 (the animated strike), the continuation queue push
-175a70, get_adjusted_speed 1f2cc0 (the priority, verified in initiative.py),
-dynamic_cast, the resolve_attacks handler, end_melee_attack 16ea60,
-begin_melee_retaliation 16f130, and virtual accessors: abilities, effects,
-can_retaliate, alive, slot +0x38, no-op slot +0x14.
+strike 16e520 (the animated strike), the continuation queue push
+175a70, priority getter 1f2cc0 (the priority, verified in initiative.py),
+dynamic_cast, the settle_hits handler, after_strike 16ea60,
+delayed_retaliation 16f130, and virtual accessors: abilities, effects,
+retaliation_check, alive, slot +0x38, no-op slot +0x14.
 See decomp/melee_attack.md.
 """
 import argparse
@@ -69,22 +69,22 @@ class Bench:
         self.stamp = 0
         # Hooked fixture boundaries: address -> (handler, bytes of arguments popped).
         self.hooks = {
-            BASE + 0x16e520: (self.begin_melee_attack, 16),
+            BASE + 0x16e520: (self.strike, 16),
             BASE + 0x175a70: (self.push_continuation, 8),
             BASE + 0x1f2cc0: (self.adjusted_speed, 0),
-            BASE + 0x16ea60: (self.end_melee_attack, 8),
-            BASE + 0x16f130: (self.begin_melee_retaliation, 4),
-            self.code + 0x00: (self.resolve_attacks, 0),
-            self.code + 0x10: (self.can_retaliate, 12),
+            BASE + 0x16ea60: (self.after_strike, 8),
+            BASE + 0x16f130: (self.delayed_retaliation, 4),
+            self.code + 0x00: (self.settle_hits, 0),
+            self.code + 0x10: (self.retaliation_check, 12),
             self.code + 0x20: (lambda uc, sp: None, 0),   # target/attacker slot +0x14
             self.code + 0x30: (self.this_object, 0),      # slot +0x24: the object itself
         }
         for address in self.hooks:
             self.uc.hook_add(UC_HOOK_CODE, self.hook, begin=address, end=address)
-        # A handler object for resolve_attacks: [vptr][refs][vptr of the callable part].
-        self.resolve_handler = HEAP + 0x9000
-        self.o.word(self.resolve_handler + 4, 1000)
-        self.o.word(self.resolve_handler + 8, HEAP + 0x9100)
+        # A handler object for settle_hits: [vptr][refs][vptr of the callable part].
+        self.settle_handler = HEAP + 0x9000
+        self.o.word(self.settle_handler + 4, 1000)
+        self.o.word(self.settle_handler + 8, HEAP + 0x9100)
         self.o.word(HEAP + 0x9100 + 4, self.code)
 
     # --- hooks -----------------------------------------------------------------
@@ -101,9 +101,9 @@ class Bench:
     def name(self, pointer):
         return {self.a: 'A', self.d: 'D', self.a + SUB: 'a', self.d + SUB: 'd', 0: '0'}.get(pointer, '?')
 
-    def begin_melee_attack(self, uc, sp):
+    def strike(self, uc, sp):
         if uc.reg_read(UC_X86_REG_ECX) != self.field:
-            raise RuntimeError('begin_melee_attack on another object')
+            raise RuntimeError('strike on another object')
         who, target, sequential, retaliation = self.args(sp, 4)
         self.calls.append('{}>{}:{}{}'.format(self.name(who), self.name(target), sequential & 0xff, retaliation & 0xff))
 
@@ -116,21 +116,21 @@ class Bench:
             raise RuntimeError('time stamp read from a creature that is not acting')
         uc.reg_write(UC_X86_REG_EAX, self.stamp & 0xffffffff)
 
-    def resolve_attacks(self, uc, sp):
+    def settle_hits(self, uc, sp):
         self.handled.append('resolve')
 
-    def end_melee_attack(self, uc, sp):
+    def after_strike(self, uc, sp):
         n, flag = self.args(sp, 2)
         n = n - 2**32 if n >= 2**31 else n
         self.handled.append('end({}:{})'.format(n, flag & 0xff))
 
-    def begin_melee_retaliation(self, uc, sp):
+    def delayed_retaliation(self, uc, sp):
         self.handled.append('retaliation({})'.format(self.args(sp, 1)[0] & 0xff))
 
-    def can_retaliate(self, uc, sp):
+    def retaliation_check(self, uc, sp):
         attacker, ranged, n = self.args(sp, 3)
         if uc.reg_read(UC_X86_REG_ECX) != self.d + SUB or attacker != self.a or ranged & 0xff or n != 1:
-            raise RuntimeError('unexpected can_retaliate call')
+            raise RuntimeError('unexpected retaliation_check call')
         uc.reg_write(UC_X86_REG_EAX, self.can_ret)
 
     def this_object(self, uc, sp):
@@ -176,7 +176,7 @@ class Bench:
         self.creature(self.a, 40, abilities, effects, shots=shots)
         return [int(self.o.call(0x1f1d10, (ranged,), this=self.a))]
 
-    def set_retaliated(self, old, old_stamp, value, stamp):
+    def mark_retaliated(self, old, old_stamp, value, stamp):
         self.creature(self.d, 50, [], [])
         self.uc.mem_write(self.d + 0xa9, bytes((old,)))
         self.o.word(self.d + 0xb70, old_stamp)
@@ -205,7 +205,7 @@ class Bench:
             raise RuntimeError('round reset block did not finish')
         return [uc.mem_read(self.d + 0xa9, 1)[0], self.signed(self.d + 0xb70)]
 
-    def begin_attack(self, can_ret, a_abilities, d_abilities, d_state, a38, d38, moved, return_after):
+    def start_melee(self, can_ret, a_abilities, d_abilities, d_state, a38, d38, moved, return_after):
         self.creature(self.a, 60, a_abilities, [], slot38=a38)
         self.creature(self.d, 70, d_abilities, [0x0b] if d_state == 'stunned' else [],
                       alive=0 if d_state == 'dead' else 1, slot38=d38)
@@ -213,9 +213,9 @@ class Bench:
         self.uc.mem_write(f, bytes(0x600))
         self.o.word(f + 0x28, self.a)
         self.o.word(f + 0x504, self.d + SUB)
-        self.o.word(f + 0x478, self.resolve_handler)
+        self.o.word(f + 0x478, self.settle_handler)
         self.o.word(f + 0x314, moved)
-        self.uc.mem_write(f + 0x2f0, b'\x07')   # shows whether begin_attack writes it
+        self.uc.mem_write(f + 0x2f0, b'\x07')   # shows whether start_melee writes it
         Original.casts = {self.d + SUB: self.d}
         self.can_ret = can_ret
         self.stamp = 1234
@@ -264,14 +264,14 @@ def main():
                            bits(abilities, [STRIKES_TWICE, EXTRA_MELEE, SHOOTS_TWICE, EXTRA_RANGED]), shots))
     stamps = [-3_000_000, -2_999_000, -1000, 0, 1, 1006, 2006, 3_000_000]
     for old, old_stamp, value, stamp in itertools.product([0, 1], [0, 77], [0, 1], [-2006, 0, 6, 1006, 2006]):
-        emit('S', (old, old_stamp, value, stamp), bench.set_retaliated(old, old_stamp, value, stamp))
+        emit('S', (old, old_stamp, value, stamp), bench.mark_retaliated(old, old_stamp, value, stamp))
     for flag, saved, now in itertools.product([0, 1], stamps, [-2006, -6, 0, 6, 1006, 2006]):
         emit('C', (flag, saved, now), bench.clear(flag, saved, now))
     for flag, saved in itertools.product([0, 1], stamps):
         emit('R', (flag, saved), bench.round_reset(flag, saved))
     for case in itertools.product([0, 1], range(8), range(8), ['ok', 'stunned', 'dead'], [0, 1], [0, 1], [3, 4], [0, 1]):
         can_ret, a_mask, d_mask, d_state, a38, d38, moved, return_after = case
-        emit('B', case, bench.begin_attack(
+        emit('B', case, bench.start_melee(
             can_ret, bits(a_mask, [FIRST_STRIKE, FIRST_STRIKE_IMMUNITY, STRIKES_TWICE]),
             bits(d_mask, [FIRST_STRIKE, FIRST_STRIKE_IMMUNITY, UNLIMITED_RETALIATION]),
             d_state, a38, d38, moved, return_after))

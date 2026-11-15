@@ -15,7 +15,7 @@ fn int(field: &str) -> i32 {
     field.parse().unwrap()
 }
 
-/// The stamp the bench's acting stack has (its `get_adjusted_speed` fixture).
+/// The stamp the bench's acting stack has (its priority fixture).
 const BENCH_PRIORITY: i32 = 1234;
 
 /// The plan written the way the bench prints what the exe did.
@@ -32,7 +32,7 @@ fn render(plan: &h4_rules::battle::melee::MeleePlan, return_after: i32) -> (Stri
         })
         .collect::<Vec<_>>()
         .join(",");
-    // resolve_attacks is always queued first, then the continuation.
+    // Settling the queued hits is always queued first, then the continuation.
     let then = match plan.then {
         Continuation::EndMeleeAttack { strikes_left } => format!("resolve,end({strikes_left}:{return_after})"),
         Continuation::BeginRetaliation => format!("resolve,retaliation({return_after})"),
@@ -107,7 +107,7 @@ fn melee_attack_rules_match_the_original() {
                 assert_eq!(plan.retaliating, f[11] == "1", "{line}");
                 // The bench's target starts with the flag clear.
                 let mut flag = RetaliationFlag::default();
-                if let Some(value) = plan.set_retaliated {
+                if let Some(value) = plan.mark_retaliated {
                     flag.set(value, BENCH_PRIORITY);
                 }
                 let stamp = if flag.retaliated { flag.stamp.to_string() } else { "-".to_string() };
@@ -117,6 +117,6 @@ fn melee_attack_rules_match_the_original() {
             other => panic!("unknown vector kind {other}"),
         }
     }
-    println!("attacks {} / set {} / clear {} / round {} / begin_attack {}", counts[0], counts[1], counts[2], counts[3], counts[4]);
+    println!("attacks {} / set {} / clear {} / round {} / start {}", counts[0], counts[1], counts[2], counts[3], counts[4]);
     assert_eq!(counts, [640, 40, 96, 16, 6144]);
 }

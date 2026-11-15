@@ -64,7 +64,7 @@ pub struct ObjectModel {
     /// them (rva 0x4c860); kept here only for inspection.
     pub trigger: Vec<bool>,
     pub object_type: ObjectType,
-    /// Which footprint cells need flat ground (`is_cell_flat`): 0 none, 1 the impassable
+    /// Which footprint cells need flat ground (rva `4c6f0`): 0 none, 1 the impassable
     /// ones, 2 all.
     pub flat_mode: u8,
     pub flag_offset: Option<(i32, i32)>,

@@ -241,7 +241,7 @@ fn occupied_ids(field: &BattlefieldGrid) -> BTreeSet<u32> {
 
 /// A unit as an object on the collision grid. A living unit blocks its cells;
 /// the body of a dead one stays on the field but blocks nothing, like in the
-/// exe (`t_combat_creature::blocks_movement`, rva `1ef5a0`: number > 0).
+/// exe (rva `1ef5a0`: number > 0).
 fn unit_obstacle(
     id: UnitId,
     position: UnitPosition,
@@ -672,8 +672,8 @@ impl BattleState {
         Ok(unit)
     }
 
-    /// A hit of `damage` on `target` (`t_combat_creature::add_damage`, rva
-    /// `1f2800`). The damage only becomes *pending*: nobody dies until
+    /// A hit of `damage` on `target` (the exe's damage intake,
+    /// rva `1f2800`). The damage only becomes *pending*: nobody dies until
     /// `apply_damage`. Several hits may pile up first, but never more than the
     /// stack has left, so the returned accepted damage can be less than asked.
     /// `permanent` marks the kills of this damage as permanent deaths.
@@ -721,8 +721,8 @@ impl BattleState {
     }
 
     /// Turn the pending damage of `target` into wounds and losses
-    /// (`t_combat_creature::apply_damage`, rva `1ef2d0`, and `resolve_damage`,
-    /// rva `1eee40`). Without pending damage nothing happens and nothing is
+    /// (the exe's rva `1ef2d0`, and rva `1eee40`
+    /// for the arithmetic). Without pending damage nothing happens and nothing is
     /// logged. A stack that loses its last creature dies: see [`Self::kill`].
     pub fn apply_damage(&mut self, target: UnitId) -> Result<Losses, String> {
         let unit = self

@@ -98,7 +98,7 @@ pub struct Hero {
     pub events: OwnedEvents,
 }
 
-/// `t_hero::read_from_map` (rva `72f470`), versions 8..10.
+/// The map reader of `t_hero` (rva `72f470`), versions 8..10.
 pub(crate) fn read_hero(r: &mut Reader) -> Result<Hero> {
     let at = r.pos;
     let version = r.u16()?;

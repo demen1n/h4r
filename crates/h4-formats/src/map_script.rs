@@ -314,8 +314,7 @@ pub struct Event {
     pub players: u8,
     /// Two flag bits stored next to `players` (meaning not checked).
     pub flags: u8,
-    /// Continuous owned events: run only during the owner's turn (name from the setter
-    /// `set_run_only_during_owners_turn` in the debug map).
+    /// Continuous owned events: run only during the owner's turn.
     pub owners_turn_only: bool,
 }
 
