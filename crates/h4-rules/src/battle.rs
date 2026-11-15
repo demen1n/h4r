@@ -19,6 +19,7 @@
 
 pub mod deployment;
 pub mod initiative;
+pub mod melee;
 pub mod state;
 pub mod wounds;
 pub use state::BattleState;
