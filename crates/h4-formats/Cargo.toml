@@ -9,5 +9,7 @@ description = "Readers for Heroes of Might and Magic IV data files"
 flate2 = "1"
 
 [dev-dependencies]
+log.workspace = true
+env_logger.workspace = true
 # to build small synthetic .h4r archives in tests
 flate2 = "1"

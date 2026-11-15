@@ -110,7 +110,7 @@ impl Play {
         for a in self.state.armies.iter().filter(|a| a.at.level == self.level) {
             let name = looks.actor(&a.army);
             let Some(actor) = name.as_deref().and_then(|n| actors.get(n)) else {
-                eprintln!("army at ({}, {}): no model for {}", a.at.col, a.at.row, describe(&a.army));
+                log::warn!("army at ({}, {}): no model for {}", a.at.col, a.at.row, describe(&a.army));
                 continue;
             };
             // the player's heroes look to the right like in the original, monsters at the viewer

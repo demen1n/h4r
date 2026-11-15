@@ -6,6 +6,7 @@ license.workspace = true
 description = "Game rules of Heroes of Might and Magic IV, without graphics"
 
 [dependencies]
+log.workspace = true
 # the game's tables (creature stats) and maps as read from the files; the rules
 # themselves don't open files
 h4-formats = { path = "../h4-formats" }
@@ -13,3 +14,6 @@ h4-formats = { path = "../h4-formats" }
 h4-state = { path = "../h4-state" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+
+[dev-dependencies]
+env_logger.workspace = true

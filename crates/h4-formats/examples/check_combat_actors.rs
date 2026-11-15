@@ -3,6 +3,7 @@ use h4_formats::archive::{data_dir, Resources};
 use h4_formats::combat_actor::CombatActorModel;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let res = Resources::open(data_dir(std::env::args().nth(1)))?;
     let mut names: Vec<_> = res.names().filter(|n| n.to_lowercase().starts_with("combat_actor.")).collect();
     names.sort();
@@ -43,7 +44,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Err(e) => {
-                eprintln!("{name}: {e}");
+                log::warn!("{name}: {e}");
                 failures += 1;
             }
         }

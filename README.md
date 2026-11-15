@@ -144,6 +144,7 @@ Optional environment variables:
 
 | Variable | Purpose |
 | --- | --- |
+| `RUST_LOG` | Log filter; default `info`, e.g. `h4_game=debug,h4_rules=warn` or `off` |
 | `H4_DATA` | Path to the game's `data` directory |
 | `H4_MAP` | Path to a standalone `.h4c` map |
 | `H4_LEVEL=1` | Open the underground level, if present |
@@ -153,6 +154,8 @@ Optional environment variables:
 | `H4_OVERVIEW=1` | Start with an overview of the map |
 | `H4_SCREENSHOT=out.png` | Capture a rendered frame and exit; requires a graphics environment |
 | `H4_ORDERS="10,30;end;tab;level"` | Execute scripted movement and turn commands; useful with screenshots |
+
+Applications and resource-check examples use `log` + `env_logger`. Diagnostics go to stderr with a level and module target; normal CLI reports remain on stdout. Set `RUST_LOG=debug` for all diagnostics or select modules (Rust targets use underscores, e.g. `h4_rules=warn`). `RUST_LOG=off` silences logs; CLI usage and returned errors are still displayed.
 
 ### Battlefield resource viewer
 

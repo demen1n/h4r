@@ -231,13 +231,14 @@ fn window_conf() -> Conf {
 
 #[macroquad::main(window_conf)]
 async fn main() {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let args: Vec<_> = std::env::args().skip(1).collect();
     let combat = args.iter().any(|a| a == "--combat");
     let dir = h4_formats::archive::data_dir(args.into_iter().find(|a| a != "--combat"));
     let res = match Resources::open(&dir) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("cannot open game data in {}: {e}", dir.display());
+            log::error!("cannot open game data in {}: {e}", dir.display());
             std::process::exit(1);
         }
     };
@@ -250,7 +251,7 @@ async fn main() {
             let model = match res.read(resource).and_then(|d| CombatActorModel::read(&d)) {
                 Ok(m) => m,
                 Err(e) => {
-                    eprintln!("{resource}: {e}");
+                    log::error!("{resource}: {e}");
                     std::process::exit(1);
                 }
             };
@@ -268,7 +269,7 @@ async fn main() {
     by_name.retain(|_, a| !a.actions.is_empty());
     let actors: Vec<Actor> = by_name.into_values().collect();
     if actors.is_empty() {
-        eprintln!("no actor animations found in {}", dir.display());
+        log::error!("no actor animations found in {}", dir.display());
         std::process::exit(1);
     }
     let start = actors.iter().position(|a| a.name.eq_ignore_ascii_case("griffin")).unwrap_or(0);

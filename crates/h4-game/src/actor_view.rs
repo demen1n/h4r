@@ -89,7 +89,7 @@ impl<'a> Actors<'a> {
             .res
             .read(&format!("adv_actor.{name}.h4d"))
             .and_then(|d| AdvActorModel::read(&d))
-            .map_err(|e| eprintln!("adv_actor.{name}: {e}"))
+            .map_err(|e| log::warn!("adv_actor.{name}: {e}"))
             .ok()
             .map(|model| Rc::new(Actor { model, animations: RefCell::new(HashMap::new()) }));
         self.actors.borrow_mut().insert(name.to_string(), loaded.clone());
