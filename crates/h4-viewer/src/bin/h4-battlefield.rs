@@ -221,10 +221,11 @@ fn config() -> Conf {
 }
 #[macroquad::main(config)]
 async fn main() {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let res = match Resources::open(data_dir(std::env::args().nth(1))) {
         Ok(res) => res,
         Err(e) => {
-            eprintln!("{e}");
+            log::error!("{e}");
             return;
         }
     };
@@ -232,7 +233,7 @@ async fn main() {
     fields.insert(0, NO_PRESET.to_string());
     let objects = names(&res, "combat_object.");
     if fields.is_empty() || objects.is_empty() {
-        eprintln!("no battlefield or scenery resources");
+        log::error!("no battlefield or scenery resources");
         return;
     }
     let mut field = 0;
@@ -243,7 +244,7 @@ async fn main() {
         {
             Some(index) => index,
             None => {
-                eprintln!("unknown scenery resource: {name}");
+                log::warn!("unknown scenery resource: {name}");
                 return;
             }
         },

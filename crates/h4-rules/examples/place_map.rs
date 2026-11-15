@@ -11,6 +11,7 @@ use h4_rules::placement::{place_random_objects, Placement, Setup, MATERIALS};
 use h4_rules::random::GlobalRandom;
 
 fn main() {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let mut args = std::env::args().skip(1);
     let path = args.next().expect("usage: place_map <map.h4c> [seed] [difficulty]");
     let seed = args.next().map_or(1, |s| s.parse().expect("seed"));

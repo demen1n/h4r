@@ -314,7 +314,7 @@ impl State<'_> {
                         let model = format!("creature generators.{}", DWELLING_MODELS[c]);
                         self.result[i] = Some(Placement::Dwelling { creature: c, model });
                     }
-                    None => eprintln!("random dwelling {:?}: no creature fits", p.major),
+                    None => log::warn!("random dwelling {:?}: no creature fits", p.major),
                 }
                 false
             }
@@ -543,7 +543,7 @@ impl State<'_> {
                         Some(model) => {
                             self.result[i] = Some(Placement::Artifact { artifact, model: model.to_string() })
                         }
-                        None => eprintln!("artifact {} has no map model", artifacts::KEYWORDS[artifact]),
+                        None => log::warn!("artifact {} has no map model", artifacts::KEYWORDS[artifact]),
                     }
                 }
             }

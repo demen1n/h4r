@@ -2,9 +2,10 @@
 
 Checked on 2026-11-01 against the exact versions in `Cargo.lock`, using
 `cargo metadata --locked --format-version 1` and locally downloaded crate sources.
+Logging dependencies were added on 2026-11-15 using locked Cargo metadata.
 The inventory includes target-specific packages, not just the current macOS build.
 
-All 48 external packages declare a GPLv3-compatible permissive license option.
+All 55 external packages declare a GPLv3-compatible permissive license option.
 For this review, MIT can be selected wherever it is offered; `foldhash` and
 `zlib-rs` use Zlib. `unicode-ident` additionally includes Unicode-3.0 data terms. Older `MIT/Apache-2.0` metadata denotes alternative licenses.
 These packages retain their upstream licenses; they are not relicensed by h4r.
@@ -12,6 +13,7 @@ These packages retain their upstream licenses; they are not relicensed by h4r.
 | Package | Version | Declared license |
 | --- | --- | --- |
 | [adler2](https://crates.io/crates/adler2/2.0.1) | 2.0.1 | 0BSD OR MIT OR Apache-2.0 |
+| [aho-corasick](https://crates.io/crates/aho-corasick/1.1.5) | 1.1.5 | Unlicense OR MIT |
 | [allocator-api2](https://crates.io/crates/allocator-api2/0.2.21) | 0.2.21 | MIT OR Apache-2.0 |
 | [autocfg](https://crates.io/crates/autocfg/1.5.1) | 1.5.1 | Apache-2.0 OR MIT |
 | [bitflags](https://crates.io/crates/bitflags/1.3.2) | 1.3.2 | MIT/Apache-2.0 |
@@ -21,6 +23,8 @@ These packages retain their upstream licenses; they are not relicensed by h4r.
 | [color_quant](https://crates.io/crates/color_quant/1.1.0) | 1.1.0 | MIT |
 | [core_maths](https://crates.io/crates/core_maths/0.1.1) | 0.1.1 | MIT |
 | [crc32fast](https://crates.io/crates/crc32fast/1.5.3) | 1.5.3 | MIT OR Apache-2.0 |
+| [env_filter](https://crates.io/crates/env_filter/2.0.0) | 2.0.0 | MIT OR Apache-2.0 |
+| [env_logger](https://crates.io/crates/env_logger/0.11.11) | 0.11.11 | MIT OR Apache-2.0 |
 | [equivalent](https://crates.io/crates/equivalent/1.0.3) | 1.0.3 | Apache-2.0 OR MIT |
 | [fdeflate](https://crates.io/crates/fdeflate/0.3.7) | 0.3.7 | MIT OR Apache-2.0 |
 | [flate2](https://crates.io/crates/flate2/1.1.10) | 1.1.10 | MIT OR Apache-2.0 |
@@ -32,6 +36,7 @@ These packages retain their upstream licenses; they are not relicensed by h4r.
 | [itoa](https://crates.io/crates/itoa/1.0.18) | 1.0.18 | MIT OR Apache-2.0 |
 | [libc](https://crates.io/crates/libc/0.2.191) | 0.2.191 | MIT OR Apache-2.0 |
 | [libm](https://crates.io/crates/libm/0.2.16) | 0.2.16 | MIT |
+| [log](https://crates.io/crates/log/0.4.35) | 0.4.35 | MIT OR Apache-2.0 |
 | [macroquad](https://crates.io/crates/macroquad/0.4.16) | 0.4.16 | MIT OR Apache-2.0 |
 | [macroquad_macro](https://crates.io/crates/macroquad_macro/0.1.8) | 0.1.8 | MIT/Apache-2.0 |
 | [malloc_buf](https://crates.io/crates/malloc_buf/0.0.6) | 0.0.6 | MIT |
@@ -46,6 +51,9 @@ These packages retain their upstream licenses; they are not relicensed by h4r.
 | [proc-macro2](https://crates.io/crates/proc-macro2/1.0.107) | 1.0.107 | MIT OR Apache-2.0 |
 | [quad-rand](https://crates.io/crates/quad-rand/0.2.3) | 0.2.3 | MIT |
 | [quote](https://crates.io/crates/quote/1.0.47) | 1.0.47 | MIT OR Apache-2.0 |
+| [regex-automata](https://crates.io/crates/regex-automata/0.4.18) | 0.4.18 | MIT OR Apache-2.0 |
+| [regex-syntax](https://crates.io/crates/regex-syntax/0.8.11) | 0.8.11 | MIT OR Apache-2.0 |
+| [regex](https://crates.io/crates/regex/1.13.1) | 1.13.1 | MIT OR Apache-2.0 |
 | [serde](https://crates.io/crates/serde/1.0.229) | 1.0.229 | MIT OR Apache-2.0 |
 | [serde_core](https://crates.io/crates/serde_core/1.0.229) | 1.0.229 | MIT OR Apache-2.0 |
 | [serde_derive](https://crates.io/crates/serde_derive/1.0.229) | 1.0.229 | MIT OR Apache-2.0 |
@@ -54,9 +62,9 @@ These packages retain their upstream licenses; they are not relicensed by h4r.
 | [syn](https://crates.io/crates/syn/3.0.9) | 3.0.9 | MIT OR Apache-2.0 |
 | [ttf-parser](https://crates.io/crates/ttf-parser/0.25.1) | 0.25.1 | MIT OR Apache-2.0 |
 | [unicode-ident](https://crates.io/crates/unicode-ident/1.0.27) | 1.0.27 | (MIT OR Apache-2.0) AND Unicode-3.0 |
-| [winapi](https://crates.io/crates/winapi/0.3.9) | 0.3.9 | MIT/Apache-2.0 |
 | [winapi-i686-pc-windows-gnu](https://crates.io/crates/winapi-i686-pc-windows-gnu/0.4.0) | 0.4.0 | MIT/Apache-2.0 |
 | [winapi-x86_64-pc-windows-gnu](https://crates.io/crates/winapi-x86_64-pc-windows-gnu/0.4.0) | 0.4.0 | MIT/Apache-2.0 |
+| [winapi](https://crates.io/crates/winapi/0.3.9) | 0.3.9 | MIT/Apache-2.0 |
 | [zlib-rs](https://crates.io/crates/zlib-rs/0.6.8) | 0.6.8 | Zlib |
 | [zmij](https://crates.io/crates/zmij/1.0.23) | 1.0.23 | MIT |
 

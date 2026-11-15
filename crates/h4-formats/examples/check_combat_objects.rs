@@ -1,6 +1,7 @@
 use h4_formats::archive::{data_dir, Resources};
 use h4_formats::combat_object::CombatObject;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let resources = Resources::open(data_dir(std::env::args().nth(1)))?;
     let mut names: Vec<_> = resources
         .names()
@@ -31,7 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Err(e) => {
-                eprintln!("{name}: {e}");
+                log::warn!("{name}: {e}");
                 failures += 1;
             }
         }

@@ -293,17 +293,18 @@ fn window_conf() -> Conf {
 
 #[macroquad::main(window_conf)]
 async fn main() {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let dir = data_dir(std::env::args().nth(1));
     let res = match Resources::open(&dir) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("cannot open game data in {}: {e}", dir.display());
+            log::error!("cannot open game data in {}: {e}", dir.display());
             std::process::exit(1);
         }
     };
     // the rules need the creatures' numbers for everything: walking, fighting, growing
     let (stats, arts) = game_tables(&res).unwrap_or_else(|e| {
-        eprintln!("game tables: {e}");
+        log::error!("game tables: {e}");
         std::process::exit(1);
     });
     // The game's global generator. The game seeds it with the clock; a fixed seed (or
@@ -344,7 +345,7 @@ async fn main() {
         }
     };
     let mut terrain = terrain.unwrap_or_else(|e| {
-        eprintln!("terrain: {e}");
+        log::error!("terrain: {e}");
         std::process::exit(1);
     });
 
@@ -444,7 +445,7 @@ async fn main() {
         // orders
         let order = if play.busy() { None } else { orders.pop() };
         if let Some(order) = &order {
-            println!("order {order:?}");
+            log::debug!("order {order:?}");
         }
         if (is_key_pressed(KeyCode::U) || order == Some(Order::NextLevel)) && !play.busy() {
             if let Some(map) = real_map.as_ref().filter(|map| map.header.levels > 1) {
@@ -500,7 +501,7 @@ async fn main() {
         play.update(&res, dt);
         // what happened also goes to the terminal, for runs without a person
         if play.message != last_message {
-            println!("{}", play.message);
+            log::info!("{}", play.message);
             last_message = play.message.clone();
         }
 
@@ -578,7 +579,7 @@ async fn main() {
         frames += 1;
         if let Some(path) = &screenshot {
             if frames >= 30 && orders.is_empty() && !play.busy() {
-                println!("{}", play.status());
+                log::info!("{}", play.status());
                 get_screen_data().export_png(path);
                 break;
             }

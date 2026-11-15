@@ -73,7 +73,7 @@ impl ObjectKind {
         let model = res
             .read(&format!("adv_object.{name}.h4d"))
             .and_then(|d| ObjectModel::read(&d))
-            .map_err(|e| eprintln!("adv_object.{name}: {e}"))
+            .map_err(|e| log::warn!("adv_object.{name}: {e}"))
             .ok()?;
         let seq = &model.image;
         let is_shadow = |l: &&Layer| l.name.to_lowercase().contains("shadow");
