@@ -1,4 +1,4 @@
-//! The melee attack command on a [`BattleState`]: the plan from `battle::melee`
+//! The melee attack and the shot commands on a [`BattleState`]: the plan from `battle::melee`
 //! (who strikes, in what order), the retaliation check from `battle::retaliation`,
 //! and the damage chain `attack_hit` → `add_damage` → `apply_damage`.
 //!
@@ -103,7 +103,10 @@ fn fighter(state: &BattleState, id: UnitId, rules: &StackRules) -> Result<Fighte
 /// Roll one strike's damage (the dice go through the battle, so they are logged).
 /// Nothing is applied yet: simultaneous strikes both roll before any loss.
 fn roll_strike(state: &mut BattleState, from: &Fighter, to: &Fighter, moved: i32) -> i32 {
-    let options = HitOptions { moved, ..HitOptions::default() };
+    roll_hit(state, from, to, HitOptions { moved, ..HitOptions::default() })
+}
+
+fn roll_hit(state: &mut BattleState, from: &Fighter, to: &Fighter, options: HitOptions) -> i32 {
     // The per-step log of the damage chain is for debugging; the battle log
     // keeps the dice.
     let mut steps = Vec::new();
@@ -280,4 +283,81 @@ fn extra_strikes(
         strike(state, report, attacker, target, ctx, Striker::Attacker, false)?;
     }
     Ok(())
+}
+
+/// `unlimited_shots`: a shot costs nothing (checked before the shots field is decreased).
+pub const UNLIMITED_SHOTS: u8 = 0x4f;
+
+/// Inputs of one shot that the battle state does not hold.
+#[derive(Debug, Clone, Default)]
+pub struct ShotContext {
+    pub attacker: StackRules,
+    pub target: StackRules,
+    /// The distance penalty from [`crate::battle::shooting::shot_range_penalty`];
+    /// 0 means the shot cannot be made. The caller supplies the battlefield view
+    /// that function needs (a field of the siege rules is not ported, #74).
+    pub penalty: i32,
+    /// The target's luck number for its luck roll (#66).
+    pub target_luck: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShotReport {
+    pub strike: StrikeReport,
+    /// What the target's luck roll did to the hit.
+    pub luck: crate::battle::luck::TargetLuck,
+}
+
+/// One shot of `attacker` at `target`, the order of the exe's damage routine
+/// (rva `175ea0`, ranged branch, `decomp/shooting.md`):
+///
+/// ```text
+/// damage = attack_hit(ranged, moved 0, normal luck)
+/// if penalty > 1: damage /= penalty          // truncating
+/// damage = max(damage, 1)
+/// accepted = add_damage(damage, luck roll of the target: yes, permanent: no)
+/// then the losses; then one shot fewer unless unlimited_shots (rva 168933)
+/// ```
+///
+/// A shooter with extra shots (`number_of_attacks` for a ranged attack) calls
+/// this once per shot. The target's answer (`can_shoot` retaliation) and the
+/// poison of ability 0x31 after the hit are not here.
+pub fn shoot(
+    state: &mut BattleState,
+    attacker: UnitId,
+    target: UnitId,
+    ctx: &ShotContext,
+) -> Result<ShotReport, String> {
+    let (a_unit, t_unit) = (
+        state.unit(attacker).ok_or("unknown attacker")?,
+        state.unit(target).ok_or("unknown target")?,
+    );
+    if a_unit.side == t_unit.side {
+        return Err("a stack cannot shoot its own side".into());
+    }
+    if !a_unit.alive() || !t_unit.alive() {
+        return Err("both stacks must be alive".into());
+    }
+    if ctx.penalty <= 0 {
+        return Err("the shot cannot be made".into());
+    }
+    if creature_shots(state, attacker) <= 0 {
+        return Err("the stack has no shots left".into());
+    }
+    let from = fighter(state, attacker, &ctx.attacker)?;
+    let to = fighter(state, target, &ctx.target)?;
+    let mut damage = roll_hit(state, &from, &to, HitOptions { ranged: true, ..HitOptions::default() });
+    if ctx.penalty > 1 {
+        damage /= ctx.penalty;
+    }
+    damage = damage.max(1);
+    let (accepted, luck) = state.add_damage_with_luck(target, attacker, damage, false, ctx.target_luck)?;
+    let losses = state.apply_damage(target)?;
+    if !ctx.attacker.abilities.contains(&UNLIMITED_SHOTS) {
+        state.spend_shot(attacker)?;
+    }
+    Ok(ShotReport {
+        strike: StrikeReport { by: Striker::Attacker, retaliation: false, damage: accepted, losses },
+        luck,
+    })
 }

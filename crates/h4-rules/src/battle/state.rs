@@ -814,6 +814,27 @@ impl BattleState {
         Ok((accepted, result))
     }
 
+    /// One shot fewer (the exe's `dec` of the shots field after a shot animation,
+    /// rva `168933`; a stack with `unlimited_shots` skips it, which is the
+    /// caller's check). Fails when the stack has no shots left: the exe's own
+    /// checks never let a shot start then.
+    pub fn spend_shot(&mut self, id: UnitId) -> Result<(), String> {
+        let unit = self
+            .data
+            .units
+            .iter_mut()
+            .find(|u| u.id == id)
+            .ok_or("unknown battle unit")?;
+        let UnitKind::Creature { shots, .. } = &mut unit.kind else {
+            return Err("heroes have no shots (#71)".into());
+        };
+        if *shots <= 0 {
+            return Err("the stack has no shots left".into());
+        }
+        *shots -= 1;
+        Ok(())
+    }
+
     /// Turn the pending damage of `target` into wounds and losses
     /// (the exe's rva `1ef2d0`, and rva `1eee40`
     /// for the arithmetic). Without pending damage nothing happens and nothing is

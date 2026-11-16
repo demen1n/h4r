@@ -2,7 +2,7 @@
 //! flag, extra strikes and snapshot replay. Uses fixture stats, no game data.
 
 use h4_rules::battle::melee::Striker;
-use h4_rules::battle::melee_command::{melee_attack, MeleeContext, StackRules};
+use h4_rules::battle::melee_command::{melee_attack, shoot, MeleeContext, ShotContext, StackRules, UNLIMITED_SHOTS};
 use h4_rules::battle::state::{BattleState, UnitId, UnitPosition};
 use h4_rules::battlefield::{BattlefieldGrid, CellSurface};
 use h4_rules::creatures::CreatureStats;
@@ -21,7 +21,7 @@ fn stats() -> Vec<CreatureStats> {
         defense: 4,
         speed: 6,
         movement: 20,
-        shots: 0,
+        shots: 8,
         weekly_growth: 10,
         alignment: 0,
         experience: 7,
@@ -153,4 +153,69 @@ fn target_luck_rolls_one_logged_die_and_changes_the_accepted_damage() {
     // Luck -10 hurts on every die: one and a half times 30.
     let (accepted, luck) = state.add_damage_with_luck(a, t, 30, false, -10).unwrap();
     assert_eq!((accepted, luck), (45, TargetLuck::Unlucky));
+}
+
+fn shots_left(state: &BattleState, id: UnitId) -> i32 {
+    match &state.unit(id).unwrap().kind {
+        h4_rules::battle::state::UnitKind::Creature { shots, .. } => *shots,
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn a_shot_divides_the_damage_by_the_penalty_and_spends_one_shot() {
+    let (state, a, t) = battle(20, 200);
+    let hit = |penalty: i32| {
+        let mut s = state.clone();
+        let report = shoot(&mut s, a, t, &ShotContext { penalty, ..Default::default() }).unwrap();
+        (report.strike.damage, shots_left(&s, a))
+    };
+    let (full, shots) = hit(1);
+    assert!(full > 1);
+    assert_eq!(shots, 7);
+    // Same dice, so the same hit before the division (which truncates).
+    assert_eq!(hit(2).0, (full / 2).max(1));
+    assert_eq!(hit(4).0, (full / 4).max(1));
+}
+
+#[test]
+fn a_shot_never_does_less_than_one_damage() {
+    let (mut state, a, t) = battle(1, 200);
+    let report = shoot(&mut state, a, t, &ShotContext { penalty: 1000, ..Default::default() }).unwrap();
+    assert_eq!(report.strike.damage, 1);
+}
+
+#[test]
+fn unlimited_shots_cost_nothing_and_a_refused_or_empty_shot_is_an_error() {
+    let (mut state, a, t) = battle(20, 200);
+    let unlimited = ShotContext {
+        attacker: StackRules { abilities: vec![UNLIMITED_SHOTS], ..Default::default() },
+        penalty: 1,
+        ..Default::default()
+    };
+    shoot(&mut state, a, t, &unlimited).unwrap();
+    assert_eq!(shots_left(&state, a), 8);
+    // Penalty 0: the shot cannot be made, nothing is rolled or spent.
+    let before = state.clone();
+    assert!(shoot(&mut state, a, t, &ShotContext { penalty: 0, ..Default::default() }).is_err());
+    assert_eq!(state, before);
+    // Out of shots.
+    for _ in 0..8 {
+        shoot(&mut state, a, t, &ShotContext { penalty: 1, ..Default::default() }).unwrap();
+    }
+    assert!(shoot(&mut state, a, t, &ShotContext { penalty: 1, ..Default::default() }).is_err());
+}
+
+#[test]
+fn a_shot_rolls_the_targets_luck_and_is_not_answered() {
+    use h4_rules::battle::luck::TargetLuck;
+    use h4_rules::battle::state::CombatEvent;
+    let (mut state, a, t) = battle(20, 200);
+    let ctx = ShotContext { penalty: 1, target_luck: 10, ..Default::default() };
+    let report = shoot(&mut state, a, t, &ctx).unwrap();
+    assert_eq!(report.luck, TargetLuck::Lucky);
+    assert!(state.events().iter().any(|e| matches!(e, CombatEvent::Rolled { purpose: 0x1b, .. })));
+    // The shooter lost nothing and no retaliation flag was set.
+    assert_eq!(state.unit(a).unwrap().total_hits(), Some(200));
+    assert!(!state.retaliation_flag(t).unwrap().retaliated);
 }
