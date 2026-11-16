@@ -305,3 +305,17 @@ ranged retaliation (ability, effect 0x2f, shots, threat count), melee reach with
 the ability/effect/size accessors, the effect eligibility answer `1b6120` and the
 threat map lookup `10d200`.
 
+
+## Line of fire of a shot
+
+```sh
+.venv/bin/python tools/testbench/line_of_fire.py --exe bin/heroes4.exe \
+  --out crates/h4-rules/tests/line_of_fire_vectors.tsv
+```
+
+3,000 random battlefields for the trace `t_battlefield` `16fe00`, executed whole
+with the step arithmetic, row bounds (`d2290`, `d2270`), cell indexing, the
+obstacle type (`477790`), the shooter's center (`28c60`) and the creatures' virtual
+accessors. Fixture boundaries: the obstacle and stack of a cell (`1838d0`,
+`183870`) and whether the gate is open (`1c0570`). Output: the stack the shot
+hits and the verdict 0 / 1 / 2. See `decomp/shooting.md`.

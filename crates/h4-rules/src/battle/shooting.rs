@@ -113,6 +113,218 @@ pub fn range_effect(distance: i32, abilities: &[u8], obstructed: bool) -> i32 {
     effect
 }
 
+/// Obstacle type numbers the trace tells apart.
+pub mod obstacle_types {
+    /// A wall piece: always stops the line.
+    pub const WALL: i32 = 0x24;
+    /// A castle gate: stops the line while it is closed.
+    pub const GATE: i32 = 0x22;
+}
+
+/// A stack as the trace sees it. `Ref` is whatever the caller uses to name stacks.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FireStack {
+    /// Virtual slot `+0x74` of the creature: which side it fights for.
+    pub side: bool,
+    /// The byte at `+0x9bc` of the creature. Its meaning is not known; a stack
+    /// with it set takes the shot even when another stack stands before it.
+    pub flag_9bc: bool,
+    /// Effects (`t_spell`) on the stack; the trace asks about 0x06 and 0x89.
+    pub effects: Vec<u16>,
+    /// Footprint center in 16ths of a cell (position plus half the size).
+    pub center: (i32, i32),
+}
+
+/// What lies in one battlefield cell.
+#[derive(Debug, Clone, Default)]
+pub struct FireCell<Ref> {
+    /// Bit `0x20` of the cell's second byte: "there may be an obstacle here".
+    pub obstacle_flag: bool,
+    /// The type of the obstacle in the cell (`get_obstacle`), if one is found.
+    pub obstacle: Option<i32>,
+    /// The living stack in the cell (`get_creature`).
+    pub creature: Option<Ref>,
+}
+
+/// The battlefield as `16fe00` reads it.
+pub trait FireField {
+    type Ref: Copy + PartialEq;
+    /// Number of rows (`x` values).
+    fn rows(&self) -> i32;
+    /// First and one-past-last `y` of a row (`d2290`, `d2270`).
+    fn row_bounds(&self, x: i32) -> (i32, i32);
+    fn cell(&self, x: i32, y: i32) -> FireCell<Self::Ref>;
+    fn stack(&self, stack: Self::Ref) -> FireStack;
+    /// The castle gate of this battlefield: `None` if there is none, else
+    /// whether it is open.
+    fn gate_open(&self) -> Option<bool>;
+}
+
+/// Center of a footprint standing at `position` (16ths of a cell) with side `size`.
+pub fn footprint_center(position: (i32, i32), size: i32) -> (i32, i32) {
+    (position.0.wrapping_add(size * 8), position.1.wrapping_add(size * 8))
+}
+
+/// Walk the line of fire from the shooter to the target point (rva `16fe00`).
+///
+/// `shooter_center` and `target` are in 16ths of a cell. The line is cut into
+/// `max(|dx|, |dy|) >> 4` steps and cells are visited from the shooter's side to
+/// the target, the last one being the target's own cell. `exact_center` is the
+/// exe's fourth argument: a stack counts only if its center is exactly at
+/// `target`. `skip_friend` is the fifth: a friendly stack that is not ignored.
+///
+/// Returns the stack the shot would hit (the first one on the line, or the last
+/// one with `flag_9bc`) and the verdict. The comments mark the exe's own
+/// variables so the control flow can be checked against the disassembly.
+pub fn trace_line_of_fire<F: FireField>(
+    field: &F,
+    shooter: F::Ref,
+    shooter_center: (i32, i32),
+    target: (i32, i32),
+    exact_center: bool,
+    skip_friend: Option<F::Ref>,
+) -> (Option<F::Ref>, LineOfFire) {
+    let dx = target.0.wrapping_sub(shooter_center.0);
+    let dy = target.1.wrapping_sub(shooter_center.1);
+    let steps = dx.wrapping_abs().max(dy.wrapping_abs()) >> 4;
+    let mut verdict = 0; // the output argument: 0 clear, 1 obstructed, 2 blocked
+    let mut hit: Option<F::Ref> = None; // [esp+0x18]
+    if steps == 0 {
+        return (None, LineOfFire::Clear);
+    }
+    let me = field.stack(shooter);
+    let mut wall_seen = false; // [esp+0x13]
+    let (mut wall_first, mut wall_last) = (0, 0); // [esp+0x24], [esp+0x30]
+    let mut shooter_index = 0; // [esp+0x2c]
+    let mut run: Option<F::Ref> = None; // [esp+0x20]
+    let mut run_index = 0; // [esp+0x28]
+
+    let mut i = steps - 1;
+    loop {
+        // Position of this step: the target minus a share of the line (truncating division).
+        let cx = target.0.wrapping_sub(dx.wrapping_mul(i) / steps) >> 4;
+        let cy = target.1.wrapping_sub(dy.wrapping_mul(i) / steps) >> 4;
+        step(
+            field, shooter, &me, (cx, cy), i, (dx, target), exact_center, skip_friend,
+            &mut State {
+                verdict: &mut verdict, hit: &mut hit, wall_seen: &mut wall_seen,
+                wall_first: &mut wall_first, wall_last: &mut wall_last,
+                shooter_index: &mut shooter_index, run: &mut run, run_index: &mut run_index,
+            },
+        );
+        if i == 0 {
+            break;
+        }
+        i -= 1;
+    }
+    if wall_seen && hit.is_none() && dx < 0 {
+        verdict = 2;
+    }
+    (hit, match verdict { 0 => LineOfFire::Clear, 1 => LineOfFire::Obstructed, _ => LineOfFire::Blocked })
+}
+
+/// The trace's running variables, named after their stack slots in the exe.
+struct State<'a, R> {
+    verdict: &'a mut i32,
+    hit: &'a mut Option<R>,
+    wall_seen: &'a mut bool,
+    wall_first: &'a mut i32,
+    wall_last: &'a mut i32,
+    shooter_index: &'a mut i32,
+    run: &'a mut Option<R>,
+    run_index: &'a mut i32,
+}
+
+/// One cell of the line; every `return` is the exe's jump to the next step.
+#[allow(clippy::too_many_arguments)]
+fn step<F: FireField>(
+    field: &F,
+    shooter: F::Ref,
+    me: &FireStack,
+    (cx, cy): (i32, i32),
+    i: i32,
+    (dx, target): (i32, (i32, i32)),
+    exact_center: bool,
+    skip_friend: Option<F::Ref>,
+    st: &mut State<F::Ref>,
+) {
+    if cx < 0 || cx >= field.rows() {
+        return;
+    }
+    let (start, end) = field.row_bounds(cx);
+    if cy < start || cy >= end {
+        return;
+    }
+    let cell = field.cell(cx, cy);
+    if cell.obstacle_flag {
+        let wall = match cell.obstacle {
+            Some(obstacle_types::WALL) => true,
+            Some(obstacle_types::GATE) => field.gate_open() == Some(false),
+            _ => false,
+        };
+        if wall {
+            if !*st.wall_seen {
+                *st.wall_first = i;
+            }
+            *st.wall_seen = true;
+            *st.wall_last = i;
+        } else if *st.verdict == 0 {
+            *st.verdict = 1;
+        }
+    }
+    let mut c = cell.creature;
+    if c == Some(shooter) {
+        *st.shooter_index = i;
+        return;
+    }
+    // Which stack counts here.
+    if exact_center && c.is_some_and(|stack| field.stack(stack).center != target) {
+        c = None;
+    }
+    if c.is_none() || c != *st.run {
+        *st.run = c;
+        *st.run_index = i;
+    }
+    if let Some(stack) = c {
+        let other = field.stack(stack);
+        let ignored = if other.side == me.side
+            && !me.effects.contains(&6)
+            && !other.effects.contains(&6)
+        {
+            // A friend is looked through, except the one the caller named.
+            Some(stack) != skip_friend
+        } else {
+            false
+        };
+        if ignored || other.effects.contains(&0x89) {
+            return;
+        }
+    }
+    if *st.wall_seen && !me.flag_9bc {
+        if dx >= 0 {
+            if *st.shooter_index - *st.wall_last > 4 {
+                *st.verdict = 2;
+                return;
+            }
+        } else {
+            if *st.wall_first - *st.run_index > 4 {
+                *st.verdict = 2;
+            } else if *st.verdict == 0 {
+                *st.verdict = 1;
+            }
+        }
+    }
+    let Some(stack) = c else { return };
+    let flagged = field.stack(stack).flag_9bc;
+    if st.hit.is_some() && !flagged {
+        return;
+    }
+    *st.hit = Some(stack);
+    if flagged {
+        *st.verdict = 1;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,6 +361,63 @@ mod tests {
         assert_eq!(edge_distance((8, 8), 1, (16, 0), 1), 0);
         // Bigger footprints shorten it.
         assert_eq!(edge_distance((16, 16), 2, (96, 0), 2), 4);
+    }
+
+    /// One row of cells; stacks and walls placed by hand.
+    struct Row {
+        cells: Vec<FireCell<u8>>,
+    }
+
+    impl FireField for Row {
+        type Ref = u8;
+        fn rows(&self) -> i32 {
+            1
+        }
+        fn row_bounds(&self, _: i32) -> (i32, i32) {
+            (0, self.cells.len() as i32)
+        }
+        fn cell(&self, _: i32, y: i32) -> FireCell<u8> {
+            self.cells[y as usize].clone()
+        }
+        fn stack(&self, stack: u8) -> FireStack {
+            // 1 is the shooter; 2 an enemy; 3 a friend of the shooter.
+            FireStack { side: stack != 2, ..Default::default() }
+        }
+        fn gate_open(&self) -> Option<bool> {
+            None
+        }
+    }
+
+    fn row(stacks: &[(usize, u8)]) -> Row {
+        let mut cells = vec![FireCell::default(); 8];
+        for &(at, stack) in stacks {
+            cells[at].creature = Some(stack);
+        }
+        Row { cells }
+    }
+
+    #[test]
+    fn the_shot_hits_the_first_enemy_and_looks_through_friends() {
+        // Shooter in cell 0, a friend in 2, an enemy in 4, the target point in cell 6.
+        let field = row(&[(0, 1), (2, 3), (4, 2)]);
+        let from = (8, 8);
+        // The cell row is x, the cells run along y: aim along y.
+        let (hit, verdict) = trace_line_of_fire(&field, 1, from, (8, 16 * 6 + 8), false, None);
+        assert_eq!((hit, verdict), (Some(2), LineOfFire::Clear));
+        // Without the enemy nothing is hit.
+        let empty = row(&[(0, 1), (2, 3)]);
+        assert_eq!(trace_line_of_fire(&empty, 1, from, (8, 16 * 6 + 8), false, None), (None, LineOfFire::Clear));
+        // A point in the shooter's own cell has no line at all.
+        assert_eq!(trace_line_of_fire(&field, 1, from, (8, 8), false, None), (None, LineOfFire::Clear));
+    }
+
+    #[test]
+    fn a_wall_piece_on_the_line_that_is_not_a_wall_obstructs() {
+        let mut field = row(&[(0, 1)]);
+        field.cells[3].obstacle_flag = true;
+        field.cells[3].obstacle = Some(5);
+        let (hit, verdict) = trace_line_of_fire(&field, 1, (8, 8), (8, 16 * 6 + 8), false, None);
+        assert_eq!((hit, verdict), (None, LineOfFire::Obstructed));
     }
 
     #[test]
