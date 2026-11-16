@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use super::initiative::{
     defending_defense, morale_result, InitiativeStats, RoundInitiative, UnitInitiative,
 };
+use super::melee::RetaliationFlag;
 use super::wounds;
 use super::Side;
 use crate::battlefield::{BattlefieldGrid, CellOccupant, CombatFootprint, PlacedObstacle};
@@ -22,7 +23,7 @@ use crate::creatures::CreatureStats;
 use crate::random::{CombatDice, CombatRandom};
 
 /// Version of our JSON fixture, not the original game's saved-battle format.
-pub const SNAPSHOT_VERSION: u32 = 3;
+pub const SNAPSHOT_VERSION: u32 = 4;
 
 /// Stable within one battle. Also the occupant ID in the collision grid and the
 /// ID passed to combat dice. IDs are never vector indices or adventure army IDs.
@@ -64,6 +65,8 @@ pub enum UnitKind {
         /// Creatures that died from damage flagged as permanent.
         permanent_deaths: i32,
         shots: i32,
+        /// "Already retaliated" and when it is forgotten (`battle::melee`).
+        retaliation: RetaliationFlag,
     },
     /// No invented HP or combat stats. Heroes are participants, including in
     /// hero-only armies; their actual fighting rules belong to #71.
@@ -333,6 +336,7 @@ impl BattleState {
                             pending_damage: 0,
                             pending_permanent: false,
                             permanent_deaths: 0,
+                            retaliation: RetaliationFlag::default(),
                             shots: stats.shots,
                             stats,
                             initial_count: stack.count,
@@ -514,6 +518,7 @@ impl BattleState {
             .map(|u| u.id)
             .collect();
         trial.begin_round(&order)?;
+        trial.new_round_for_retaliation();
         let mut initiative = RoundInitiative {
             last_side: previous
                 .as_ref()
@@ -655,9 +660,70 @@ impl BattleState {
             }
             self.data.turns.active = Some(unit);
             self.data.events.push(CombatEvent::TurnStarted { unit });
+            if let Some(priority) = self.acting_priority() {
+                self.retaliation_turn_started(priority);
+            }
             return Ok(Some(unit));
         }
         Ok(None)
+    }
+
+    /// Initiative priority of the stack whose turn it is (`1f2cc0`), the time
+    /// stamp of the retaliation flag. `None` without a native initiative round
+    /// or an active turn.
+    pub fn acting_priority(&self) -> Option<i32> {
+        let active = self.data.turns.active?;
+        let initiative = self.data.turns.initiative.as_ref()?;
+        initiative
+            .entries
+            .iter()
+            .find(|e| e.unit == active)
+            .map(|e| e.priority())
+    }
+
+    /// The "already retaliated" flag of a creature stack; `None` for heroes
+    /// and unknown units.
+    pub fn retaliation_flag(&self, id: UnitId) -> Option<RetaliationFlag> {
+        match &self.unit(id)?.kind {
+            UnitKind::Creature { retaliation, .. } => Some(*retaliation),
+            UnitKind::Hero(_) => None,
+        }
+    }
+
+    /// Set or clear the flag (`1f6b20`). The time stamp is the priority of the
+    /// acting stack, or 0 outside a native initiative round.
+    pub fn set_retaliated(&mut self, id: UnitId, value: bool) -> Result<(), String> {
+        let priority = self.acting_priority().unwrap_or(0);
+        let unit = self
+            .data
+            .units
+            .iter_mut()
+            .find(|u| u.id == id)
+            .ok_or("unknown battle unit")?;
+        let UnitKind::Creature { retaliation, .. } = &mut unit.kind else {
+            return Err("heroes have no retaliation flag (#71)".into());
+        };
+        retaliation.set(value, priority);
+        Ok(())
+    }
+
+    /// Round reset for every stack's flag (`1ecfb0`).
+    fn new_round_for_retaliation(&mut self) {
+        for unit in &mut self.data.units {
+            if let UnitKind::Creature { retaliation, .. } = &mut unit.kind {
+                retaliation.new_round();
+            }
+        }
+    }
+
+    /// A stack with this priority starts its turn: flags that have waited long
+    /// enough are forgotten (`1f6b60`).
+    fn retaliation_turn_started(&mut self, priority: i32) {
+        for unit in &mut self.data.units {
+            if let UnitKind::Creature { retaliation, .. } = &mut unit.kind {
+                retaliation.turn_started(priority);
+            }
+        }
     }
 
     pub fn finish_turn(&mut self) -> Result<UnitId, String> {
