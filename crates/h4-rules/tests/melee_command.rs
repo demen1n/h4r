@@ -78,7 +78,7 @@ fn a_second_attack_in_the_same_round_is_not_answered() {
 
 #[test]
 fn extra_strikes_come_after_the_answer_and_are_not_answered() {
-    let (mut state, a, t) = battle(20, 200);
+    let (mut state, a, t) = battle(100, 100);
     let ctx = MeleeContext {
         moved: 10,
         attacker: StackRules { abilities: vec![0x46], ..Default::default() }, // strikes twice
@@ -110,4 +110,28 @@ fn the_flag_and_dice_survive_a_snapshot() {
     let first = melee_attack(&mut state, t, a, &ctx).unwrap();
     let second = melee_attack(&mut loaded, t, a, &ctx).unwrap();
     assert_eq!(first, second);
+}
+
+#[test]
+fn the_flag_is_forgotten_a_round_later_at_the_attackers_place_in_the_order() {
+    use h4_rules::battle::initiative::InitiativeStats;
+    let (mut state, a, t) = battle(20, 20);
+    let stats = [
+        (a, InitiativeStats { speed: 8, morale: 0 }),
+        (t, InitiativeStats { speed: 6, morale: 0 }),
+    ];
+    state.begin_initiative_round(&stats).unwrap();
+    assert_eq!(state.begin_next_turn().unwrap(), Some(a));
+    melee_attack(&mut state, a, t, &MeleeContext { moved: 10, ..Default::default() }).unwrap();
+    assert!(state.retaliation_flag(t).unwrap().retaliated);
+    state.finish_turn().unwrap();
+    // The target's own turn in the same round does not clear it.
+    assert_eq!(state.begin_next_turn().unwrap(), Some(t));
+    assert!(state.retaliation_flag(t).unwrap().retaliated);
+    state.finish_turn().unwrap();
+    assert_eq!(state.begin_next_turn().unwrap(), None);
+    // Next round: it goes when the attacker's turn comes round again.
+    state.begin_initiative_round(&stats).unwrap();
+    assert_eq!(state.begin_next_turn().unwrap(), Some(a));
+    assert!(!state.retaliation_flag(t).unwrap().retaliated);
 }
