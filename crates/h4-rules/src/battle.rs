@@ -23,6 +23,7 @@ pub mod luck;
 pub mod melee;
 pub mod melee_command;
 pub mod retaliation;
+pub mod shooting;
 pub mod state;
 pub mod wounds;
 pub use state::BattleState;
