@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use super::initiative::{
     defending_defense, morale_result, InitiativeStats, RoundInitiative, UnitInitiative,
 };
+use super::luck::{apply_target_luck, TargetLuck};
 use super::melee::RetaliationFlag;
 use super::wounds;
 use super::Side;
@@ -784,6 +785,33 @@ impl BattleState {
             permanent,
         });
         Ok(accepted)
+    }
+
+    /// [`Self::add_damage`] with the target's luck roll first (the exe does it
+    /// inside the same function when the caller asks, rva `1f2800`). The die is
+    /// `(target, attacker, 0x1b)` and goes through [`Self::roll`], so it is
+    /// logged. A hit below 1 returns before any die is rolled, as in the exe.
+    /// Returns the damage accepted and what the luck did.
+    ///
+    /// `luck` is the target's luck number, given by the caller (#66: the rules
+    /// that make it from skills and artifacts are not ported).
+    pub fn add_damage_with_luck(
+        &mut self,
+        target: UnitId,
+        attacker: UnitId,
+        damage: i32,
+        permanent: bool,
+        luck: i32,
+    ) -> Result<(i32, TargetLuck), String> {
+        self.unit(target).ok_or("unknown battle unit")?;
+        self.unit(attacker).ok_or("unknown battle unit")?;
+        if damage < 1 {
+            return Ok((0, TargetLuck::Normal));
+        }
+        let die = self.roll(target.0, attacker.0, 0x1b);
+        let (damage, result) = apply_target_luck(damage, die, luck);
+        let accepted = self.add_damage(target, damage, permanent)?;
+        Ok((accepted, result))
     }
 
     /// Turn the pending damage of `target` into wounds and losses

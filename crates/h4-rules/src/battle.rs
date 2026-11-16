@@ -19,6 +19,7 @@
 
 pub mod deployment;
 pub mod initiative;
+pub mod luck;
 pub mod melee;
 pub mod melee_command;
 pub mod retaliation;
