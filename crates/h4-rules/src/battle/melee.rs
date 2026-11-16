@@ -86,7 +86,7 @@ const ROUND_SHIFT: i32 = 3_000_000;
 /// retaliated may do it again one round later, at the same point of the turn
 /// order: in the next round, as soon as a stack with a priority not higher than
 /// the remembered one starts its turn.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RetaliationFlag {
     pub retaliated: bool,
     /// Only meaningful while `retaliated` is set.
