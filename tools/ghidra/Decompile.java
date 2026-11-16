@@ -22,7 +22,14 @@ public class Decompile extends GhidraScript {
 		Set<Function> seen = new LinkedHashSet<>();
 		Deque<Object[]> todo = new ArrayDeque<>();
 		for (int i = 2; i < args.length; i++) {
-			Function f = getFunctionAt(toAddr(base + Long.parseLong(args[i], 16)));
+			Address at = toAddr(base + Long.parseLong(args[i], 16));
+			Function f = getFunctionAt(at);
+			if (f == null) {
+				// Not a known function start: disassemble and create it (in memory only;
+				// the project is opened read-only, so nothing is saved).
+				disassemble(at);
+				f = createFunction(at, null);
+			}
 			if (f != null) todo.add(new Object[] { f, 0 });
 		}
 		try (PrintWriter w = new PrintWriter(args[0])) {

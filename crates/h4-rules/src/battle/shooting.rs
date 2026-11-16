@@ -140,9 +140,9 @@ pub struct FireStack {
 pub struct FireCell<Ref> {
     /// Bit `0x20` of the cell's second byte: "there may be an obstacle here".
     pub obstacle_flag: bool,
-    /// The type of the obstacle in the cell (`get_obstacle`), if one is found.
+    /// The type of the obstacle found in the cell, if any.
     pub obstacle: Option<i32>,
-    /// The living stack in the cell (`get_creature`).
+    /// The living stack in the cell.
     pub creature: Option<Ref>,
 }
 
