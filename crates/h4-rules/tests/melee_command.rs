@@ -135,3 +135,22 @@ fn the_flag_is_forgotten_a_round_later_at_the_attackers_place_in_the_order() {
     assert_eq!(state.begin_next_turn().unwrap(), Some(a));
     assert!(!state.retaliation_flag(t).unwrap().retaliated);
 }
+
+#[test]
+fn target_luck_rolls_one_logged_die_and_changes_the_accepted_damage() {
+    use h4_rules::battle::luck::TargetLuck;
+    use h4_rules::battle::state::CombatEvent;
+    let (mut state, a, t) = battle(20, 20);
+    // No hit, no die.
+    assert_eq!(state.add_damage_with_luck(t, a, 0, false, 5).unwrap(), (0, TargetLuck::Normal));
+    assert!(!state.events().iter().any(|e| matches!(e, CombatEvent::Rolled { purpose: 0x1b, .. })));
+    // Luck 10 helps on every die (0..9): two thirds of 30.
+    let (accepted, luck) = state.add_damage_with_luck(t, a, 30, false, 10).unwrap();
+    assert_eq!((accepted, luck), (20, TargetLuck::Lucky));
+    assert!(state.events().iter().any(
+        |e| matches!(e, CombatEvent::Rolled { first, second, purpose: 0x1b, .. } if *first == t.0 && *second == a.0)
+    ));
+    // Luck -10 hurts on every die: one and a half times 30.
+    let (accepted, luck) = state.add_damage_with_luck(a, t, 30, false, -10).unwrap();
+    assert_eq!((accepted, luck), (45, TargetLuck::Unlucky));
+}
