@@ -319,3 +319,15 @@ obstacle type (`477790`), the shooter's center (`28c60`) and the creatures' virt
 accessors. Fixture boundaries: the obstacle and stack of a cell (`1838d0`,
 `183870`) and whether the gate is open (`1c0570`). Output: the stack the shot
 hits and the verdict 0 / 1 / 2. See `decomp/shooting.md`.
+
+## Shot penalty chain
+
+```sh
+.venv/bin/python tools/testbench/shot_penalty.py --exe bin/heroes4.exe \
+  --out crates/h4-rules/tests/shot_penalty_vectors.tsv
+```
+
+3,000 battlefields for the whole `t_battlefield` method `170800`: the checks, the
+line-of-fire trace (`16fe00`), the edge distance (`1f17d0`, `f100`) and the penalty
+table (`2509f0`) run as the original code. Reuses the world of `line_of_fire.py`
+and adds the threat lookup (`10d200`, a supplied count). Answers 0, 1, 2, 4 and 8.

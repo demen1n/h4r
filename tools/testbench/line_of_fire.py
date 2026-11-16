@@ -59,7 +59,7 @@ class Bench:
             raise RuntimeError('unexpected gate')
         return self.gate_open
 
-    def creature(self, obj, slot, side, flag, effects, size, position):
+    def creature(self, obj, slot, side, flag, effects, size, position, abilities=(), shots=0):
         o = self.o
         self.uc.mem_write(obj, bytes(0x1000))
         table, vbtable, base_vt, effects_vt = obj + 0xf00, obj + 0xf80, obj + 0xfc0, obj + 0xe80
@@ -74,8 +74,11 @@ class Bench:
         for i, v in enumerate(position + (0,)):
             o.word(obj + 0xc + 4 * i, v)
         self.uc.mem_write(obj + 0x9bc, bytes((flag,)))
+        o.word(table + 0x68, o.lookup(slot + 3, list(abilities)))  # has ability
+        o.word(table + 0x4c, o.accessor(slot + 4, shots, pop=0))  # shots left
 
-    def run(self, world):
+    def build(self, world):
+        """Write the battlefield and its stacks into memory; returns name -> address."""
         o, uc = self.o, self.uc
         uc.mem_write(FIELD, bytes(0x400))
         rows = world['rows']
@@ -95,11 +98,11 @@ class Bench:
         uc.mem_write(CELLS, bytes(28 * max(index, 1)))
         o.word(FIELD + 0x340, 0 if world['gate'] is None else GATE + 0x28)
         self.gate_open = 0 if world['gate'] is None else world['gate']
-        self.creature(SHOOTER, 3, *world['shooter'])
+        self.creature(SHOOTER, 0, *world['shooter'], abilities=world.get('abilities', ()), shots=world.get('shots', 0))
         addresses = {'S': SHOOTER}
         for k, (name, side, flag, effects, size, position) in enumerate(world['stacks']):
             addresses[name] = STACKS + 0x1000 * k
-            self.creature(addresses[name], 6 + 3 * k, side, flag, effects, size, position)
+            self.creature(addresses[name], 5 * (k + 1), side, flag, effects, size, position)
         self.cell_obstacle, self.cell_creature = {}, {}
         for n, (x, y, flags, obstacle, creature) in enumerate(world['cells']):
             cell = CELLS + 28 * (bases[x] + y)
@@ -112,6 +115,11 @@ class Bench:
                 self.cell_obstacle[cell] = obj
             if creature is not None:
                 self.cell_creature[cell] = addresses[creature]
+        return addresses
+
+    def run(self, world):
+        o = self.o
+        addresses = self.build(world)
         o.word(POINT, world['target'][0])
         o.word(POINT + 4, world['target'][1])
         o.word(OUT, 0xdead)

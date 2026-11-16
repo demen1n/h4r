@@ -325,6 +325,56 @@ fn step<F: FireField>(
     }
 }
 
+/// What `170800` reads beyond the field's stacks: the shooter's own numbers
+/// and where both stacks stand (16ths of a cell, the corner of the footprint).
+#[derive(Debug, Clone, Default)]
+pub struct ShotInput<'a> {
+    pub shooter_abilities: &'a [u8],
+    pub shots: i32,
+    /// The battlefield's threat number for the shooter (see [`AimCheck`]).
+    pub threats: i32,
+    pub shooter_position: (i32, i32),
+    pub shooter_size: i32,
+    pub target_position: (i32, i32),
+    pub target_size: i32,
+}
+
+/// The divisor of the shot's damage (rva `170800`, whole chain): 0 when the
+/// shot cannot be made, else the penalty of [`range_effect`]. `1eebf0` then
+/// divides by at least 1.
+///
+/// The shooter's effects and the target's come from the field's stacks. The
+/// line of fire is traced to the target's center; the shot needs to hit the
+/// target itself and not be refused (verdict 2). The distance is measured
+/// from the cell the shooter stands in (its position rounded down to a cell).
+pub fn shot_range_penalty<F: FireField>(field: &F, shooter: F::Ref, target: F::Ref, input: &ShotInput) -> i32 {
+    let (me, other) = (field.stack(shooter), field.stack(target));
+    let aim = AimCheck {
+        shooter_abilities: input.shooter_abilities,
+        shooter_effects: &me.effects,
+        shots: input.shots,
+        threats: input.threats,
+        target_effects: &other.effects,
+    };
+    if !can_aim(&aim) {
+        return 0;
+    }
+    let aim_at = footprint_center(input.target_position, input.target_size);
+    let from = footprint_center(input.shooter_position, input.shooter_size);
+    let (hit, verdict) = trace_line_of_fire(field, shooter, from, aim_at, false, None);
+    if verdict == LineOfFire::Blocked || hit != Some(target) {
+        return 0;
+    }
+    let cell = (input.shooter_position.0 >> 4 << 4, input.shooter_position.1 >> 4 << 4);
+    let distance = edge_distance(
+        footprint_center(cell, input.shooter_size),
+        input.shooter_size,
+        input.target_position,
+        input.target_size,
+    );
+    range_effect(distance, input.shooter_abilities, verdict == LineOfFire::Obstructed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
