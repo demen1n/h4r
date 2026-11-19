@@ -13,8 +13,8 @@
 //! index.
 //!
 //! Keys repeat in two files (`strings.Text.h4d` lists seven network menu keys twice), always
-//! with the same text; the index keeps both rows, earlier row first, and [`StringTable::get`]
-//! returns the first.
+//! with the same text. The index keeps both rows, not always in file order, and
+//! [`StringTable::get`] returns the one listed first in the index.
 
 use std::cmp::Ordering;
 
@@ -32,7 +32,7 @@ pub struct StringTable {
     /// Every row of the file, including section titles and blank lines.
     rows: Vec<Vec<String>>,
     /// Numbers of the rows that have a key and a text, sorted by key ignoring case
-    /// (rows with equal keys stay in file order).
+    /// (rows with equal keys in whatever order the file lists them).
     index: Vec<usize>,
 }
 
@@ -87,6 +87,8 @@ impl StringTable {
         // `windows(2)` gives every pair of neighbours: [a, b], [b, c], ...
         for pair in table.index.windows(2) {
             let (a, b) = (table.key(pair[0]), table.key(pair[1]));
+            // Equal keys may come in any order: in the game's files they sometimes go against
+            // file order (the later row of a repeated key listed first).
             if compare_keys(a, b) == Ordering::Greater {
                 return bad(format!("{name}: index is not sorted: {a:?} before {b:?}"));
             }
@@ -97,7 +99,7 @@ impl StringTable {
     /// The text for `key` (case doesn't matter, as in the game), or `None` if there is none.
     pub fn get(&self, key: &str) -> Option<&str> {
         // The first position whose key is not less than `key`: if `key` is in the table,
-        // its first row is there. Same idea as `lower_bound` in C++.
+        // its first row in index order is there. Same idea as `lower_bound` in C++.
         let pos = self.index.partition_point(|&row| compare_keys(self.key(row), key) == Ordering::Less);
         let &row = self.index.get(pos)?;
         if compare_keys(self.key(row), key) == Ordering::Equal {
@@ -185,7 +187,7 @@ mod tests {
         let t = StringTable::read(&sample(), "test").unwrap();
         assert_eq!(t.get("cancel"), Some("Cancel"));
         assert_eq!(t.get("APPLY"), Some("Apply"));
-        assert_eq!(t.get("ok"), Some("OK")); // the first of the two rows
+        assert_eq!(t.get("ok"), Some("OK")); // the first of the two rows in the index
         assert_eq!(t.get("missing"), None);
         assert_eq!(t.get(""), None); // titles are not in the index
         let keys: Vec<&str> = t.entries().map(|(k, _)| k).collect();
@@ -214,6 +216,10 @@ mod tests {
         assert!(StringTable::read(&encode(rows, &[3, 1, 0]), "test").is_err(), "section title");
         assert!(StringTable::read(&encode(rows, &[1]), "test").is_err(), "row left out");
         assert!(StringTable::read(&encode(rows, &[1, 1]), "test").is_err(), "row repeated");
+        // equal keys in either order are fine; `get` follows the index
+        let repeated: &[&[&str]] = &[&["ok", "first"], &["OK", "second"]];
+        let t = StringTable::read(&encode(repeated, &[1, 0]), "test").unwrap();
+        assert_eq!(t.get("ok"), Some("second"));
     }
 
     #[test]

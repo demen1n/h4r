@@ -243,12 +243,11 @@ fn string_tables() {
             }
         };
         // `read` already checked that the index lists exactly the rows with a key and a text.
-        // Here: every key is found, and gives the text of its first row in the file.
-        let rows = table.rows();
-        for row in rows.iter().filter(|r| r.len() >= 2 && !r[0].is_empty()) {
-            let first = rows.iter().find(|r| r.len() >= 2 && r[0] == row[0]).expect("row itself");
-            if table.get(&row[0]) != Some(first[1].as_str()) {
-                failures.push(format!("{name}: key {:?} not found", row[0]));
+        // Here: every key is found, and gives the text listed first for it in the index.
+        for (key, _) in table.entries() {
+            let first = table.entries().find(|(k, _)| k == &key).map(|(_, text)| text);
+            if table.get(key) != first {
+                failures.push(format!("{name}: key {key:?} not found"));
             }
         }
         if table.entries().count() == 0 {
