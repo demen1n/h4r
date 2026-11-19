@@ -10,6 +10,7 @@ mod common;
 use common::{assert_no_failures, names_with_prefix, resources};
 use h4_formats::adv_actor::AdvActorModel;
 use h4_formats::sprite::{read_bitmap_group, ActorSequence, Layer};
+use h4_formats::strings::StringTable;
 use h4_formats::terrain::{column_height, Metatile, METATILE_SIZE, TILE_HEIGHT, TILE_WIDTH};
 use h4_formats::transition::{Transitions, MAP_MASK_SETS};
 
@@ -19,6 +20,7 @@ const ADV_ACTORS: usize = 154;
 const TERRAINS: usize = 61;
 const TRANSITION_SETS: usize = 15;
 const MASKS_PER_SET: usize = 93;
+const STRING_TABLES: usize = 5;
 
 // Oddities of the game's own data, not of our readers. Listed by name so that anything new
 // still fails the tests.
@@ -223,4 +225,35 @@ fn broken_aliases_are_still_broken() {
         assert!(res.entry(name).is_some(), "{name} is no longer in the archives");
         assert!(res.read(name).is_err(), "{name} now resolves; remove it from BROKEN_ALIASES");
     }
+}
+
+#[test]
+fn string_tables() {
+    let Some(res) = resources() else { return };
+    let names = names_with_prefix(&res, "strings.");
+    assert_eq!(names.len(), STRING_TABLES, "number of strings.* resources");
+
+    let mut failures = Vec::new();
+    for name in names {
+        let table = match res.read(name).and_then(|d| StringTable::read(&d, name)) {
+            Ok(t) => t,
+            Err(e) => {
+                failures.push(format!("{name}: {e}"));
+                continue;
+            }
+        };
+        // The index lists exactly the rows with a key and a text: none is left out.
+        let keyed = table.rows.iter().filter(|r| r.len() >= 2 && !r[0].is_empty()).count();
+        if keyed != table.index.len() {
+            failures.push(format!("{name}: {keyed} keyed rows but {} in the index", table.index.len()));
+        }
+        // Every key is found, and gives the text of its first row in the file.
+        for row in table.rows.iter().filter(|r| r.len() >= 2 && !r[0].is_empty()) {
+            let first = table.rows.iter().find(|r| r.len() >= 2 && r[0] == row[0]).expect("row itself");
+            if table.get(&row[0]) != Some(first[1].as_str()) {
+                failures.push(format!("{name}: key {:?} not found", row[0]));
+            }
+        }
+    }
+    assert_no_failures("string tables", &failures);
 }

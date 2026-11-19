@@ -9,7 +9,8 @@
 //! - [`map`]: adventure maps (`.h4c`): header and tiles; [`map_body`]: events and objects in
 //!   between ([`map_script`]: scripts and events, [`map_army`]: armies and heroes);
 //!   [`cp1251`]: Russian text.
-//! - [`table`]: spreadsheet-like game tables (`table.*.h4d`: creatures, spells, ...).
+//! - [`table`]: spreadsheet-like game tables (`table.*.h4d`: creatures, spells, ...);
+//!   [`strings`]: texts by key (`strings.*.h4d`: interface, messages).
 //! - [`png`]: a minimal RGBA PNG writer for dumping decoded images.
 
 pub mod adv_actor;
@@ -26,6 +27,7 @@ pub mod map_body;
 pub mod map_script;
 pub mod png;
 pub mod sprite;
+pub mod strings;
 pub mod table;
 pub mod terrain;
 pub mod transition;
