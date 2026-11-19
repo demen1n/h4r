@@ -18,7 +18,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     names.sort();
     for name in &names {
         let picture = BitmapRaw::read(&resources.read(name)?, name)?;
-        let path = out.join(format!("{name}.png"));
+        // Names come from the archive: drop path separators so a file can't land outside `out`.
+        let file = name.replace(['/', '\\'], "_");
+        let path = out.join(format!("{file}.png"));
         std::fs::write(&path, png::encode_rgba(picture.width, picture.height, &picture.to_rgba()))?;
         println!("{name}: {}x{} -> {}", picture.width, picture.height, path.display());
     }

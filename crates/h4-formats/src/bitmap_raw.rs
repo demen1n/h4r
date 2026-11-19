@@ -33,6 +33,10 @@ impl BitmapRaw {
         let width = r.u32()?;
         let size = r.u32()? as usize;
 
+        // An empty picture can't be shown or saved; no game file has one.
+        if width == 0 || height == 0 {
+            return bad(format!("{name}: empty picture {width}x{height}"));
+        }
         // The size the picture needs. `checked_mul` returns `None` instead of overflowing
         // when a damaged header holds huge numbers.
         let needed = (width as usize).checked_mul(height as usize).and_then(|n| n.checked_mul(BYTES_PER_PIXEL));
@@ -90,6 +94,8 @@ mod tests {
             assert!(BitmapRaw::read(&data[..len], "test").is_err(), "cut at {len}");
         }
         assert!(BitmapRaw::read(&encode(2, 1, 5, &pixels[..5]), "test").is_err(), "size field");
+        assert!(BitmapRaw::read(&encode(0, 1, 0, &[]), "test").is_err(), "zero width");
+        assert!(BitmapRaw::read(&encode(2, 0, 0, &[]), "test").is_err(), "zero height");
         assert!(BitmapRaw::read(&encode(2, 1, 6, &[0; 7]), "test").is_err(), "trailing byte");
         let huge = encode(u32::MAX, u32::MAX, 6, &pixels);
         assert!(BitmapRaw::read(&huge, "test").is_err(), "overflowing size");
