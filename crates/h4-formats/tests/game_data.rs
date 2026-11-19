@@ -242,17 +242,17 @@ fn string_tables() {
                 continue;
             }
         };
-        // The index lists exactly the rows with a key and a text: none is left out.
-        let keyed = table.rows.iter().filter(|r| r.len() >= 2 && !r[0].is_empty()).count();
-        if keyed != table.index.len() {
-            failures.push(format!("{name}: {keyed} keyed rows but {} in the index", table.index.len()));
-        }
-        // Every key is found, and gives the text of its first row in the file.
-        for row in table.rows.iter().filter(|r| r.len() >= 2 && !r[0].is_empty()) {
-            let first = table.rows.iter().find(|r| r.len() >= 2 && r[0] == row[0]).expect("row itself");
+        // `read` already checked that the index lists exactly the rows with a key and a text.
+        // Here: every key is found, and gives the text of its first row in the file.
+        let rows = table.rows();
+        for row in rows.iter().filter(|r| r.len() >= 2 && !r[0].is_empty()) {
+            let first = rows.iter().find(|r| r.len() >= 2 && r[0] == row[0]).expect("row itself");
             if table.get(&row[0]) != Some(first[1].as_str()) {
                 failures.push(format!("{name}: key {:?} not found", row[0]));
             }
+        }
+        if table.entries().count() == 0 {
+            failures.push(format!("{name}: no entries"));
         }
     }
     assert_no_failures("string tables", &failures);
