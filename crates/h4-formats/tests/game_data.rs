@@ -9,6 +9,8 @@ mod common;
 
 use common::{assert_no_failures, names_with_prefix, resources};
 use h4_formats::adv_actor::AdvActorModel;
+use h4_formats::archive::{data_dir, Archive, LOAD_ORDER};
+use h4_formats::bitmap_raw::BitmapRaw;
 use h4_formats::sprite::{read_bitmap_group, ActorSequence, Layer};
 use h4_formats::strings::StringTable;
 use h4_formats::terrain::{column_height, Metatile, METATILE_SIZE, TILE_HEIGHT, TILE_WIDTH};
@@ -21,6 +23,8 @@ const TERRAINS: usize = 61;
 const TRANSITION_SETS: usize = 15;
 const MASKS_PER_SET: usize = 93;
 const STRING_TABLES: usize = 5;
+/// Main menu backgrounds: three screen sizes in each of `heroes4`, `storm` and `x2`.
+const BITMAP_RAWS: usize = 9;
 
 // Oddities of the game's own data, not of our readers. Listed by name so that anything new
 // still fails the tests.
@@ -256,4 +260,45 @@ fn string_tables() {
         }
     }
     assert_no_failures("string tables", &failures);
+}
+
+#[test]
+fn bitmap_raws() {
+    // Check `resources()` first: it skips the test (with a message) when there is no game.
+    if resources().is_none() {
+        return;
+    }
+    // Every archive's copy, not only the visible ones: each expansion has its own menu.
+    let dir = data_dir(None);
+    let mut failures = Vec::new();
+    let mut count = 0;
+    for archive_name in LOAD_ORDER {
+        let path = dir.join(archive_name);
+        if !path.exists() {
+            continue;
+        }
+        let archive = Archive::open(&path).unwrap();
+        let entries = archive.entries.iter().filter(|e| e.alias.is_none());
+        for entry in entries.filter(|e| e.name.to_lowercase().starts_with("bitmap_raw.")) {
+            count += 1;
+            let name = format!("{archive_name}: {}", entry.name);
+            match archive.read(entry).and_then(|d| BitmapRaw::read(&d, &name)) {
+                Ok(b) => {
+                    // The name ends with the screen width: menu.main.0800 is 800x600.
+                    let size = match entry.name.to_lowercase().trim_end_matches(".h4d").rsplit('.').next() {
+                        Some("0800") => (800, 600),
+                        Some("1024") => (1024, 768),
+                        Some("1280") => (1280, 1024),
+                        _ => (0, 0),
+                    };
+                    if (b.width, b.height) != size || b.unknown != 1 {
+                        failures.push(format!("{name}: {}x{}, first u32 {}", b.width, b.height, b.unknown));
+                    }
+                }
+                Err(e) => failures.push(format!("{name}: {e}")),
+            }
+        }
+    }
+    assert_eq!(count, BITMAP_RAWS, "number of bitmap_raw resources in all archives");
+    assert_no_failures("bitmap_raw pictures", &failures);
 }
