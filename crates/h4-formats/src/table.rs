@@ -22,22 +22,7 @@ impl Table {
     /// Parse a `table.*.h4d` file. `name` is only used in error messages.
     pub fn read(data: &[u8], name: &str) -> Result<Table> {
         let mut r = Reader::new(data);
-        let row_count = r.u32()? as usize;
-        // Every row takes at least 2 bytes, so a bigger count can only be garbage;
-        // checking it first avoids a huge allocation on a corrupt file.
-        if row_count > r.remaining() / 2 {
-            return bad(format!("{name}: {row_count} rows don't fit in {} bytes", data.len()));
-        }
-        let mut rows = Vec::with_capacity(row_count);
-        for _ in 0..row_count {
-            let cells = r.u16()? as usize;
-            let mut row = Vec::with_capacity(cells);
-            for _ in 0..cells {
-                let len = r.u16()? as usize;
-                row.push(cp1251::decode(r.take(len)?));
-            }
-            rows.push(row);
-        }
+        let rows = read_rows(&mut r, name)?;
         if r.remaining() != 0 {
             return bad(format!("{name}: {} bytes left after the last row", r.remaining()));
         }
@@ -57,6 +42,29 @@ impl Table {
         let names = self.rows.get(if second_empty { 0 } else { 1 })?;
         names.iter().position(|c| c.trim() == title)
     }
+}
+
+/// Read the rows: u32 row count, then each row as a u16 cell count and cells of u16 length
+/// plus cp1251 text. String tables (`strings.*.h4d`) start with the same rows, so they share
+/// this; the reader stops right after the last row and leaves the rest to the caller.
+pub(crate) fn read_rows(r: &mut Reader, name: &str) -> Result<Vec<Vec<String>>> {
+    let row_count = r.u32()? as usize;
+    // Every row takes at least 2 bytes, so a bigger count can only be garbage;
+    // checking it first avoids a huge allocation on a corrupt file.
+    if row_count > r.remaining() / 2 {
+        return bad(format!("{name}: {row_count} rows don't fit in {} bytes", r.remaining()));
+    }
+    let mut rows = Vec::with_capacity(row_count);
+    for _ in 0..row_count {
+        let cells = r.u16()? as usize;
+        let mut row = Vec::with_capacity(cells);
+        for _ in 0..cells {
+            let len = r.u16()? as usize;
+            row.push(cp1251::decode(r.take(len)?));
+        }
+        rows.push(row);
+    }
+    Ok(rows)
 }
 
 #[cfg(test)]
