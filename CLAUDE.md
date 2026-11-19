@@ -125,7 +125,11 @@ u16 размер палитры (256), u16 флаг block-alpha, палитра 
 
 - `layers.*`: u16 число слоёв + слои (кнопки: Disabled/Highlighted/Pressed/Released).
 - `actor_sequence.*`: u16 2, u16 2, u16 число слоёв (кадры, затем столько же теней) + слои + хвост 10 байт (2×i32, видимо точка привязки, + u16).
-- Проверено на выборке: `actor_sequence` 29/30, `animation` 30/30, `layers` 30/30, часть `font`, `bitmap_raw`; `combat_object` и фоны `battlefield_preset_map` — полностью (см. «Поле боя» выше).
+- Проверено на выборке: `actor_sequence` 29/30, `animation` 30/30, `layers` 30/30, часть `font`; `combat_object` и фоны `battlefield_preset_map` — полностью (см. «Поле боя» выше).
+
+### Фоны меню: `bitmap_raw.*` (`h4-formats/src/bitmap_raw.rs`)
+
+`bitmap_raw.menu.main.0800/1024/1280` — фон главного меню на каждый размер экрана, свой набор у базы, `storm` и `x2`. Без палитры: u32 (игра пропускает, всегда 1), u32 высота, u32 ширина, u32 размер данных, затем пиксели по 3 байта **BGR**, строки сверху вниз (читатель rva `199190`). `examples/dump_bitmap_raw.rs` — в PNG.
 
 ### Земля: метатайлы `terrain.*` (`crates/h4-formats/src/terrain.rs`)
 
