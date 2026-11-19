@@ -12,6 +12,7 @@
 //!   [`cp1251`]: Russian text.
 //! - [`table`]: spreadsheet-like game tables (`table.*.h4d`: creatures, spells, ...);
 //!   [`strings`]: texts by key (`strings.*.h4d`: interface, messages).
+//! - [`sound`]: sound effects, voice-overs and music (PCM or MP3 with a short header).
 //! - [`png`]: a minimal RGBA PNG writer for dumping decoded images.
 
 pub mod adv_actor;
@@ -28,6 +29,7 @@ pub mod map_army;
 pub mod map_body;
 pub mod map_script;
 pub mod png;
+pub mod sound;
 pub mod sprite;
 pub mod strings;
 pub mod table;
