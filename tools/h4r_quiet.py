@@ -12,7 +12,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from h4r import read_dir, unpack  # noqa: E402
 
-HDR = 19  # per-resource sound header: format, bits, channels, rate, length...
+HDR = 15  # PCM sound header: format, version, bits, channels, rate, size, u16 (h4-formats/src/sound.rs)
 
 
 def rms_db(samples):

@@ -11,6 +11,7 @@ use common::{assert_no_failures, names_with_prefix, resources};
 use h4_formats::adv_actor::AdvActorModel;
 use h4_formats::archive::{data_dir, Archive, LOAD_ORDER};
 use h4_formats::bitmap_raw::BitmapRaw;
+use h4_formats::sound::{Sound, SoundFormat};
 use h4_formats::sprite::{read_bitmap_group, ActorSequence, Layer};
 use h4_formats::strings::StringTable;
 use h4_formats::terrain::{column_height, Metatile, METATILE_SIZE, TILE_HEIGHT, TILE_WIDTH};
@@ -25,6 +26,12 @@ const MASKS_PER_SET: usize = 93;
 const STRING_TABLES: usize = 5;
 /// Main menu backgrounds: three screen sizes in each of `heroes4`, `storm` and `x2`.
 const BITMAP_RAWS: usize = 9;
+/// Sounds in all archives together (`updates.h4r` here has 178 quieted spell sounds added,
+/// see CLAUDE.local.md; an untouched install has fewer).
+const SOUNDS_AT_LEAST: usize = 1000;
+/// Sounds whose unknown header u16 is not 1.
+const SOUND_UNKNOWN_EXCEPTIONS: &[&str] =
+    &["sound.castle.chaos.die.h4d", "sound.Voice_Over.H4x1_campaign_3_prologue.h4d"];
 
 // Oddities of the game's own data, not of our readers. Listed by name so that anything new
 // still fails the tests.
@@ -301,4 +308,43 @@ fn bitmap_raws() {
     }
     assert_eq!(count, BITMAP_RAWS, "number of bitmap_raw resources in all archives");
     assert_no_failures("bitmap_raw pictures", &failures);
+}
+
+#[test]
+fn sounds() {
+    if resources().is_none() {
+        return;
+    }
+    // Every archive's copy: later archives hold originals that earlier ones replace.
+    let dir = data_dir(None);
+    let mut failures = Vec::new();
+    let mut count = 0;
+    for archive_name in LOAD_ORDER {
+        let path = dir.join(archive_name);
+        if !path.exists() {
+            continue;
+        }
+        let archive = Archive::open(&path).unwrap();
+        let entries = archive.entries.iter().filter(|e| e.alias.is_none());
+        for entry in entries.filter(|e| e.name.to_lowercase().starts_with("sound.")) {
+            count += 1;
+            let name = format!("{archive_name}: {}", entry.name);
+            match archive.read(entry).and_then(|d| Sound::read(&d, &name)) {
+                Ok(sound) => {
+                    if sound.unknown != 1 && !SOUND_UNKNOWN_EXCEPTIONS.contains(&entry.name.as_str()) {
+                        failures.push(format!("{name}: unknown u16 is {}", sound.unknown));
+                    }
+                    // MP3 data starts with a frame (0xFF and three more set bits) or an ID3 tag.
+                    let frame = matches!(sound.data[..], [0xff, second, ..] if second & 0xe0 == 0xe0);
+                    let mp3_start = frame || sound.data.starts_with(b"ID3");
+                    if sound.format == SoundFormat::Mp3 && !mp3_start {
+                        failures.push(format!("{name}: MP3 data doesn't start with a frame"));
+                    }
+                }
+                Err(e) => failures.push(format!("{name}: {e}")),
+            }
+        }
+    }
+    assert!(count >= SOUNDS_AT_LEAST, "only {count} sound resources");
+    assert_no_failures("sounds", &failures);
 }
