@@ -243,9 +243,10 @@ fn string_tables() {
             }
         };
         // `read` already checked that the index lists exactly the rows with a key and a text.
-        // Here: every key is found, and gives the text listed first for it in the index.
+        // Here: every key is found, and gives the text listed first for it in the index
+        // (keys compared ignoring Latin case, as `get` does).
         for (key, _) in table.entries() {
-            let first = table.entries().find(|(k, _)| k == &key).map(|(_, text)| text);
+            let first = table.entries().find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, text)| text);
             if table.get(key) != first {
                 failures.push(format!("{name}: key {key:?} not found"));
             }
