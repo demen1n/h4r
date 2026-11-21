@@ -403,3 +403,16 @@ maps), 400 maps with the stop of a moving creature (`16c4a0`) and the turns to r
 vector of points (`20e7b0`). Extra boundary: the creature's path finder (`1f7680`). `16c4a0`
 is asked only about reached cells other than the start (otherwise the exe reads a point
 through a null pointer).
+
+```sh
+.venv/bin/python tools/testbench/zone_of_control.py --exe bin/heroes4.exe \
+  --out crates/h4-rules/tests/zone_of_control_vectors.tsv
+```
+
+`zone_of_control.py`: 300 random fields of up to 8 creatures. Every creature's threat is
+added with the real `172000` (its threat footprint from the real cache `48b350`: map lookup
+and insert, the builder `48b090` with `11ed40`/`11edb0`/`11ed80`, and the cell list insert
+`1835f0`); the threat lists of all cells are recorded, then `172210` answers the
+zone-of-control directions for movers at corners near enemies. Boundaries: the creature's
+combat footprint (`f0f0`, built by the real `1fc340` after every arena reset), atexit for
+the cache's static, and the creatures' virtual accessors.

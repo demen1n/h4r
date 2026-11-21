@@ -231,3 +231,37 @@ fn the_attack_positions_are_the_exes_list() {
     assert!(refused.is_err());
     assert_eq!(state, before);
 }
+
+#[test]
+fn an_enemy_facing_the_mover_holds_it_in_its_zone() {
+    use h4_rules::battle::zone_of_control::{zones_for, ZoneTraits};
+    // The enemy at (50, 46) faces direction 6, (0, -1): toward the mover's column.
+    let (mut state, a, t) = battle(open_field(), 1, (50, 40), (50, 46));
+    let traits = |id: UnitId| ZoneTraits { facing: if id == t { 6 } else { 2 }, ..ZoneTraits::default() };
+    let zone = zones_for(&state, a, traits).unwrap();
+    // Two cells in front of it: every step costs extra except along the line to the enemy.
+    assert_eq!(zone((50, 44)), [true, true, false, true, true, true, false, true]);
+    // Far away, or behind it: no zone.
+    assert_eq!(zone((50, 40)), [false; 8]);
+    assert_eq!(zone((50, 49)), [false; 8]);
+
+    // Walking straight toward the enemy pays nothing extra.
+    let report = move_unit(&mut state, a, (50, 44), &MoveRules::plain(1000), &zone).unwrap();
+    assert_eq!(report.cost, 400);
+}
+
+#[test]
+fn a_step_sideways_out_of_a_zone_costs_a_quarter_of_the_movement_more() {
+    use h4_rules::battle::zone_of_control::{zones_for, ZoneTraits};
+    let (state, a, t) = battle(open_field(), 1, (50, 44), (50, 46));
+    let traits = |id: UnitId| ZoneTraits { facing: if id == t { 6 } else { 2 }, ..ZoneTraits::default() };
+    let zone = zones_for(&state, a, traits).unwrap();
+    let free = search_for(&state, a, &MoveRules::plain(1000), no_zones).unwrap();
+    let held = search_for(&state, a, &MoveRules::plain(1000), &zone).unwrap();
+    assert_eq!(free.map.cell((51, 44)).unwrap().cost, 100);
+    // Straight sideways would be 100 + 250; the cheaper way steps back along the line to
+    // the enemy first (free), then diagonally from outside the zone: 100 + 150.
+    assert_eq!(held.map.cell((51, 44)).unwrap().cost, 250);
+    // Back along the line: no penalty.
+    assert_eq!(held.map.cell((50, 43)).unwrap().cost, 100);
+}

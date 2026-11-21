@@ -137,7 +137,7 @@ fn rounded_length(d: (i32, i32)) -> i32 {
 }
 
 /// The difference of two angles in degrees, 0..=180 (`11ed80`).
-fn angle_difference(a: i32, b: i32) -> i32 {
+pub(crate) fn angle_difference(a: i32, b: i32) -> i32 {
     let d = a.wrapping_sub(b).wrapping_abs() % 360;
     if d < 181 { d } else { 360 - d }
 }

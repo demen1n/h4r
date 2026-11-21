@@ -17,8 +17,8 @@
 //!
 //! The map is prepared elsewhere ([`crate::battle::path_template`],
 //! [`crate::battle::path_prepare`]); the move command on a battle is
-//! [`crate::battle::move_command`]. The zone-of-control directions (`172210`, issue #63)
-//! are given by the caller.
+//! [`crate::battle::move_command`]. The zone-of-control directions (`172210`)
+//! are given by the caller: [`crate::battle::zone_of_control::zones_for`] builds them.
 
 use crate::battlefield::CombatFootprint;
 
