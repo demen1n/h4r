@@ -23,6 +23,8 @@ pub mod luck;
 pub mod melee;
 pub mod melee_command;
 pub mod path;
+pub mod path_prepare;
+pub mod path_template;
 pub mod retaliation;
 pub mod shooting;
 pub mod state;
