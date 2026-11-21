@@ -349,3 +349,31 @@ directions `172210`, the creature's accessors and the static direction table (it
 initializer `305880` builds string maps at startup; the bench writes the eight
 offsets `3054b0` stores). Output: every cell record that changed, and the found
 path for a few targets. See `decomp/combat_path.md`.
+
+## Path map template and preparation
+
+```sh
+.venv/bin/python tools/testbench/combat_path_template.py --exe bin/heroes4.exe \
+  --out crates/h4-rules/tests/combat_path_template_vectors.tsv
+.venv/bin/python tools/testbench/combat_path_prepare.py --exe bin/heroes4.exe \
+  --out crates/h4-rules/tests/combat_path_prepare_vectors.tsv
+```
+
+`combat_path_template.py`: 600 random battlefields for the template map of a footprint
+size: the battlefield's blockage map (`20e900`) and the template (`20dfd0`) run whole
+with the fit check (`1650d0`), the blockage query (`20eb20`), the marking (`20ebf0`), the
+object type (`477790`) and the point shift (`10d000`). Boundary: the footprint cache
+`1fc590` (footprints from the real `1fc340`). The blockage values keep only their low
+four bits: the exe fills the rest from a register holding the battlefield's address.
+
+`combat_path_prepare.py`: 800 cases of the preparation for one creature (`20c7f0`)
+executed whole: the template copy (`20cfb0`), the object list and its filters, the
+expanded-footprint marking (`20e0f0` with the real `1fc460`/`1fc810`, built up front
+because emulation can't restart inside a hook), the start (`20e3f0`, or `20c6d0`/`20c400`
+for a creature in a tower), the terrain map copy (`20cef0`) and the entry cost loop.
+Boundaries: the battlefield caches (`10e4f0`, `10e780`), the creature's terrain cost list
+(`225320`) and the terrain refreshes (`225260`, `2252d0`), `dynamic_cast`, the creature in a
+cell (`170d90`), the tower of a creature (`1f60a0`), hostility (`cd80`), cowardice
+(`1f52f0`) and the gate queries (`177b90`, `177990`, `1778c0`, `177bf0`, `1779c0`). Bits of
+the seeds that come from uninitialized locals are dropped. The file also holds the
+direction function `51ede0` for every offset in -20..20.

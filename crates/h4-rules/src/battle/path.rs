@@ -356,8 +356,19 @@ impl PathSearch {
         self.put(next, cell);
     }
 
+    /// The queued points in the queue's own (heap) order: the cell and the copy of its
+    /// record taken when it was queued.
+    pub fn queued(&self) -> impl Iterator<Item = ((i32, i32), &PathCell)> {
+        self.queue.iter().map(|point| (point.at, &point.cell))
+    }
+
+    /// Empty the queue (the tower start does this before queueing the exits).
+    pub(crate) fn clear_queue(&mut self) {
+        self.queue.clear();
+    }
+
     /// Store the record and queue a copy of it.
-    fn put(&mut self, at: (i32, i32), cell: PathCell) {
+    pub(crate) fn put(&mut self, at: (i32, i32), cell: PathCell) {
         *self.map.cell_mut(at).expect("the caller checked the bounds") = cell;
         self.push(Queued { cell, at });
     }
