@@ -3,7 +3,9 @@
 //! Uses fixture stats, no game data.
 
 use h4_rules::battle::melee_command::MeleeContext;
-use h4_rules::battle::move_command::{approach_and_attack, destination, move_unit, search_for, AttackOrder, MoveRules};
+use h4_rules::battle::move_command::{
+    approach_and_attack, attack_positions_against, destination, move_unit, search_for, AttackOrder, MoveRules,
+};
 use h4_rules::battle::state::{BattleState, CombatEvent, UnitId, UnitPosition};
 use h4_rules::battlefield::{BattlefieldGrid, CellSurface, FLAG_BLOCKED};
 use h4_rules::creatures::CreatureStats;
@@ -170,8 +172,8 @@ fn hit_points(state: &BattleState, id: UnitId) -> i32 {
 
 #[test]
 fn an_attack_from_where_the_unit_stands_moves_nothing() {
-    let (mut state, a, t) = battle(open_field(), 1, (50, 44), (50, 45));
-    let order = approach_and_attack(&mut state, a, t, (50, 44), &MoveRules::plain(1000), no_zones, &MeleeContext::default()).unwrap();
+    let (mut state, a, t) = battle(open_field(), 1, (50, 42), (50, 45));
+    let order = approach_and_attack(&mut state, a, t, (50, 42), &MoveRules::plain(1000), no_zones, &MeleeContext::default()).unwrap();
     let AttackOrder::Attacked { walked: None, melee } = order else { panic!("{order:?}") };
     assert!(!melee.strikes.is_empty());
     assert!(hit_points(&state, t) < 100);
@@ -181,18 +183,18 @@ fn an_attack_from_where_the_unit_stands_moves_nothing() {
 #[test]
 fn an_attack_position_within_reach_is_walked_to_and_the_target_struck() {
     let (mut state, a, t) = battle(open_field(), 1, (50, 40), (50, 45));
-    let order = approach_and_attack(&mut state, a, t, (50, 44), &MoveRules::plain(1000), no_zones, &MeleeContext::default()).unwrap();
+    let order = approach_and_attack(&mut state, a, t, (50, 42), &MoveRules::plain(1000), no_zones, &MeleeContext::default()).unwrap();
     let AttackOrder::Attacked { walked: Some(walk), melee } = order else { panic!("{order:?}") };
-    assert_eq!((walk.to, walk.cost), ((50, 44), 400));
+    assert_eq!((walk.to, walk.cost), ((50, 42), 200));
     assert!(!melee.strikes.is_empty());
     assert!(hit_points(&state, t) < 100);
-    assert_eq!(state.unit(a).unwrap().position.unwrap().at, (50, 44));
+    assert_eq!(state.unit(a).unwrap().position.unwrap().at, (50, 42));
 }
 
 #[test]
 fn an_attack_position_beyond_the_movement_is_only_approached() {
     let (mut state, a, t) = battle(open_field(), 1, (50, 40), (50, 50));
-    let order = approach_and_attack(&mut state, a, t, (50, 49), &MoveRules::plain(500), no_zones, &MeleeContext::default()).unwrap();
+    let order = approach_and_attack(&mut state, a, t, (50, 47), &MoveRules::plain(500), no_zones, &MeleeContext::default()).unwrap();
     let AttackOrder::Approached(walk) = order else { panic!("{order:?}") };
     assert_eq!((walk.to, walk.cost), ((50, 45), 500));
     assert_eq!(hit_points(&state, t), 100);
@@ -208,5 +210,24 @@ fn an_unreached_attack_position_is_an_error() {
     let (mut state, a, t) = battle(field, 1, (50, 40), (60, 60));
     let before = state.clone();
     assert!(approach_and_attack(&mut state, a, t, (50, 50), &MoveRules::plain(3000), no_zones, &MeleeContext::default()).is_err());
+    assert_eq!(state, before);
+}
+
+
+#[test]
+fn the_attack_positions_are_the_exes_list() {
+    // Footprints of 1 with the reach of 2 (no long_weapon): the positions ring the target
+    // two to three cells away, one per angle; a cell right next to it shares its angle
+    // with a farther one and is dropped (the exe keeps the farther).
+    let (mut state, a, t) = battle(open_field(), 1, (50, 40), (50, 45));
+    let list = attack_positions_against(&state, a, t, &MoveRules::plain(1000), no_zones).unwrap();
+    assert_eq!(list.len(), 16);
+    assert!(list.windows(2).all(|w| w[0].angle < w[1].angle));
+    let ahead = list.iter().find(|p| p.angle == 90).unwrap();
+    assert_eq!((ahead.at, ahead.distance, ahead.cost), ((50, 42), 48, 200));
+    assert!(!list.iter().any(|p| p.at == (50, 44)));
+    let before = state.clone();
+    let refused = approach_and_attack(&mut state, a, t, (50, 44), &MoveRules::plain(1000), no_zones, &MeleeContext::default());
+    assert!(refused.is_err());
     assert_eq!(state, before);
 }

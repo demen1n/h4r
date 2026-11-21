@@ -377,3 +377,17 @@ cell (`170d90`), the tower of a creature (`1f60a0`), hostility (`cd80`), cowardi
 (`1f52f0`) and the gate queries (`177b90`, `177990`, `1778c0`, `177bf0`, `1779c0`). Bits of
 the seeds that come from uninitialized locals are dropped. The file also holds the
 direction function `51ede0` for every offset in -20..20.
+
+```sh
+.venv/bin/python tools/testbench/attack_angles.py --exe bin/heroes4.exe \
+  --out crates/h4-rules/tests/attack_angle_vectors.tsv
+```
+
+`attack_angles.py`: 400 cases of the attack position list (`10c870`) executed whole: the
+walk over the corners around the target, the distance (`sqrt + 0.5`, `__ftol`) and angle
+(`11ed40`) of each, the vector insert (`2b2800`), the MSVC sort (`118190`/`118620`, compare
+`10d020`), the pruning by turns to reach and by near angles (`11ed80`, erase `1104d0`).
+Boundaries: the path finder's search (a no-op, its map is supplied searched), the
+battlefield's row table, and the virtual accessors of the attacker (size, movement,
+`long_weapon`, effect 0x90) and of the target (its part list, slot `+0x3c`, effect 0x89).
+Single-part targets outside towers only.
