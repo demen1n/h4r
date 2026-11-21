@@ -331,3 +331,21 @@ hits and the verdict 0 / 1 / 2. See `decomp/shooting.md`.
 line-of-fire trace (`16fe00`), the edge distance (`1f17d0`, `f100`) and the penalty
 table (`2509f0`) run as the original code. Reuses the world of `line_of_fire.py`
 and adds the threat lookup (`10d200`, a supplied count). Answers 0, 1, 2, 4 and 8.
+
+## Battlefield path search
+
+```sh
+.venv/bin/python tools/testbench/combat_path.py --exe bin/heroes4.exe \
+  --out crates/h4-rules/tests/combat_path_vectors.tsv
+```
+
+500 random path maps (up to 16 rows of up to 16 cells, footprints 1-7) for the
+search slot of the combat path finder (`20d200`), executed whole with its binary
+heap (vector insert `20be10`, sift-up, pop `20c170`, erase `4144f0`), the cover
+marking (`20e640`, with a footprint from the real constructor `1fc340`), the start
+seeding (`20e3f0`) and the path reconstruction (`20e7b0`). Fixture boundaries: the
+map preparation `20c7f0` (the supplied cells stand for its result), the zone-of-control
+directions `172210`, the creature's accessors and the static direction table (its
+initializer `305880` builds string maps at startup; the bench writes the eight
+offsets `3054b0` stores). Output: every cell record that changed, and the found
+path for a few targets. See `decomp/combat_path.md`.

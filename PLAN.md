@@ -172,6 +172,8 @@ Started 31 October: the `combat_actor` v5/v6 reader, all 158 visible resources w
 
 State model #53: `h4_rules::battle::BattleState` is created from two `MapArmy` and a prepared field. It stores participants/slots, copies of stats, stack wounds and shots, explicit placement, a queue with native initiative or fixture order, the RNG with its counters/cache, and a log. A JSON snapshot can be restored without the game and continued with the same rolls and events. Initial positions in a normal battle and compression of the three formations are implemented in #57 (`decomp/deployment.md`); initiative, wait and defend were added in #60 (`decomp/initiative.md`, 1619 exe fixtures); applying damage to a stack was added in #68 (`decomp/apply_damage.md`, 1800 exe fixtures); map integration remains in #75; heroes are stored without combat stats for now (#71). Details are in `docs/battle_state.md`.
 
+Battlefield pathfinding #62 (started): the search itself (`20d200`) with the exe's binary heap and its tie order, the occupied-cell phase (+500, the reach of large creatures and `long_weapon`), towers, walls for fliers, footprint cover (`20e640`) and path reconstruction (`20e7b0`) are ported to `h4_rules::battle::path` and matched the original on 500 executed maps (`decomp/combat_path.md`). Still given by the caller: the map preparation (`20c7f0`: blockage of creatures, gates, walls and towers, terrain costs, a start in a tower) and the zone-of-control directions (`172210`, #63); not yet connected to `BattleState`.
+
 ## Stage 5 — adventure map mechanics
 
 The result: a single map can be played through in hot-seat (several people at one computer), without AI. This is the biggest stage in terms of small rules.
