@@ -192,6 +192,14 @@ pub enum CombatEvent {
     Died {
         unit: UnitId,
     },
+    /// The active unit walked from one corner cell to another; `cost` is the
+    /// path cost of the destination (the exe's "moved this turn").
+    Moved {
+        unit: UnitId,
+        from: (i32, i32),
+        to: (i32, i32),
+        cost: u32,
+    },
 }
 
 /// What `apply_damage` or `kill` did to a stack.
@@ -446,6 +454,37 @@ impl BattleState {
         self.data
             .events
             .push(CombatEvent::Deployed { unit: id, position });
+        Ok(())
+    }
+
+    /// Move the active unit's footprint corner to `to` (the move command in
+    /// `battle::move_command` finds the place and the cost). The new cells must
+    /// be free; on failure the field, the position and the log stay as they were.
+    pub(crate) fn relocate(&mut self, id: UnitId, to: (i32, i32), cost: u32) -> Result<(), String> {
+        if self.data.turns.active != Some(id) {
+            return Err("only the unit whose turn it is can move".into());
+        }
+        let index = self
+            .data
+            .units
+            .iter()
+            .position(|u| u.id == id)
+            .ok_or("unknown battle unit")?;
+        let old = self.data.units[index]
+            .position
+            .ok_or("the unit is not on the field")?;
+        let position = UnitPosition { at: to, size: old.size };
+        let mut field = self.data.field.clone();
+        field.remove_object(id.0);
+        place_unit(&mut field, id, position, self.data.units[index].alive())?;
+        self.data.field = field;
+        self.data.units[index].position = Some(position);
+        self.data.events.push(CombatEvent::Moved {
+            unit: id,
+            from: old.at,
+            to,
+            cost,
+        });
         Ok(())
     }
 
@@ -1315,7 +1354,8 @@ impl BattleState {
                 | CombatEvent::DamageAdded { unit, .. }
                 | CombatEvent::DamageApplied { unit, .. }
                 | CombatEvent::Killed { unit, .. }
-                | CombatEvent::Died { unit } => ids.contains(unit),
+                | CombatEvent::Died { unit }
+                | CombatEvent::Moved { unit, .. } => ids.contains(unit),
                 CombatEvent::RoundStarted { order, .. } => order.iter().all(|id| ids.contains(id)),
                 CombatEvent::InitiativeStarted { state } => {
                     state.entries.iter().all(|entry| ids.contains(&entry.unit))
