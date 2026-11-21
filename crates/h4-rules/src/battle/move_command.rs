@@ -23,7 +23,8 @@
 //!   from the table's `Move` isn't found yet);
 //! - flying, teleport, `long_weapon` and effect 9 (the abilities and effects of a stack);
 //! - the combat terrain map and the creature's terrain costs (#182);
-//! - the zone-of-control directions (`172210`, #63), a closure for [`move_unit`].
+//! - the zone-of-control directions (`172210`), a closure for [`move_unit`]:
+//!   [`crate::battle::zone_of_control::zones_for`] builds it, with facings from the caller.
 //!
 //! The melee order with an approach ([`approach_and_attack`], `16b850`) builds on the
 //! same steps; the cell to strike from must be one of the target's attack positions
@@ -124,7 +125,8 @@ pub fn scenery_blockers(field: &BattlefieldGrid, units: &[BattleUnit]) -> Vec<Bl
 }
 
 /// Prepare and run the path search for a unit (`20c7f0` + `20d200`), not in attack mode.
-/// `zone` gives the zone-of-control directions of a cell (#63).
+/// `zone` gives the zone-of-control directions of a cell
+/// ([`crate::battle::zone_of_control::zones_for`]).
 pub fn search_for(
     state: &BattleState,
     id: UnitId,

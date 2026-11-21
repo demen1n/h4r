@@ -31,6 +31,7 @@ pub mod retaliation;
 pub mod shooting;
 pub mod state;
 pub mod wounds;
+pub mod zone_of_control;
 pub use state::BattleState;
 
 use serde::{Deserialize, Serialize};
