@@ -14,7 +14,9 @@
 //!    becomes the "moved this turn" distance (`t_battlefield+0x314`, which `charging` and
 //!    the target's first strike read — see `MeleeContext::moved`).
 //!
-//! Steps 4 and 5 are read from the disassembly, not executed in Unicorn.
+//! Step 4 (and the turns to reach, [`turns_to_reach`], `171340`) is verified by executing
+//! the original code (`tests/combat_path_stop_vectors.tsv`); step 5 is read from the
+//! disassembly.
 //!
 //! What the state doesn't know yet stays the caller's input, in [`MoveRules`]:
 //! - the movement points (virtual `+0x18` of the creature's stats; how the exe gets them
@@ -208,6 +210,32 @@ pub fn destination(search: &PathSearch, target: (i32, i32), movement: i32) -> Op
             .is_some_and(|c| c.cost <= movement as u32 && c.flags & flags::OCCUPIED == 0)
     };
     Some(path.iter().copied().find(fits).unwrap_or(path[0]))
+}
+
+/// In how many turns a unit standing with its corner at `from` gets to `target`
+/// (`171340`, used by the AI): 1 if it is there already or the movement pays for the way;
+/// otherwise the turns of repeated stops (`16c4a0`), each turn allowed `movement` more
+/// than the cost of the previous stop, up to 4. A stop of the target itself ends the count
+/// (also the exe's fallback when no point qualifies). -1 if there is no path.
+pub fn turns_to_reach(search: &PathSearch, from: (i32, i32), target: (i32, i32), movement: i32) -> i32 {
+    if from == target {
+        return 1;
+    }
+    let Some(path) = search.path_to(target) else { return -1 };
+    let mut turns = 0;
+    let mut spent: i32 = 0;
+    loop {
+        turns += 1;
+        let allowed = spent.wrapping_add(movement) as u32;
+        let stop = path
+            .iter()
+            .position(|at| search.map.cell(*at).is_some_and(|c| c.cost <= allowed && c.flags & flags::OCCUPIED == 0))
+            .unwrap_or(0);
+        spent = search.map.cell(path[stop]).expect("a path point is on the map").cost as i32;
+        if stop == 0 || turns >= 4 {
+            return turns;
+        }
+    }
 }
 
 /// Walk the active unit toward `target` (a footprint corner): as far as its movement goes
