@@ -3,6 +3,7 @@
 //! Uses fixture stats, no game data.
 
 use h4_rules::battle::melee_command::MeleeContext;
+use h4_rules::battle::path::DIRECTIONS;
 use h4_rules::battle::move_command::{
     approach_and_attack, attack_positions_against, destination, move_unit, search_for, AttackOrder, MoveRules,
 };
@@ -70,10 +71,16 @@ fn a_reachable_cell_is_walked_to_in_straight_steps() {
     assert_eq!(report.path, vec![(50, 41), (50, 42), (50, 43), (50, 44), (50, 45)]);
     assert_eq!(report.cost, 500);
     assert_eq!(state.unit(a).unwrap().position.unwrap().at, (50, 45));
+    // It walked along (0, 1), direction 2, and now faces that way (it started at 0).
+    let events = state.events();
     assert_eq!(
-        state.events().last(),
-        Some(&CombatEvent::Moved { unit: a, from: (50, 40), to: (50, 45), cost: 500 })
+        &events[events.len() - 2..],
+        &[
+            CombatEvent::Moved { unit: a, from: (50, 40), to: (50, 45), cost: 500 },
+            CombatEvent::Turned { unit: a, facing: 2 },
+        ]
     );
+    assert_eq!(state.unit(a).unwrap().facing, 2);
     // The new place is in the grid and survives a snapshot.
     assert!(state.field().is_blocked(50, 45, None));
     assert!(!state.field().is_blocked(50, 40, None));
@@ -237,8 +244,8 @@ fn an_enemy_facing_the_mover_holds_it_in_its_zone() {
     use h4_rules::battle::zone_of_control::{zones_for, ZoneTraits};
     // The enemy at (50, 46) faces direction 6, (0, -1): toward the mover's column.
     let (mut state, a, t) = battle(open_field(), 1, (50, 40), (50, 46));
-    let traits = |id: UnitId| ZoneTraits { facing: if id == t { 6 } else { 2 }, ..ZoneTraits::default() };
-    let zone = zones_for(&state, a, traits).unwrap();
+    state.turn(t, 6).unwrap();
+    let zone = zones_for(&state, a, |_| ZoneTraits::default()).unwrap();
     // Two cells in front of it: every step costs extra except along the line to the enemy.
     assert_eq!(zone((50, 44)), [true, true, false, true, true, true, false, true]);
     // Far away, or behind it: no zone.
@@ -253,9 +260,9 @@ fn an_enemy_facing_the_mover_holds_it_in_its_zone() {
 #[test]
 fn a_step_sideways_out_of_a_zone_costs_a_quarter_of_the_movement_more() {
     use h4_rules::battle::zone_of_control::{zones_for, ZoneTraits};
-    let (state, a, t) = battle(open_field(), 1, (50, 44), (50, 46));
-    let traits = |id: UnitId| ZoneTraits { facing: if id == t { 6 } else { 2 }, ..ZoneTraits::default() };
-    let zone = zones_for(&state, a, traits).unwrap();
+    let (mut state, a, t) = battle(open_field(), 1, (50, 44), (50, 46));
+    state.turn(t, 6).unwrap();
+    let zone = zones_for(&state, a, |_| ZoneTraits::default()).unwrap();
     let free = search_for(&state, a, &MoveRules::plain(1000), no_zones).unwrap();
     let held = search_for(&state, a, &MoveRules::plain(1000), &zone).unwrap();
     assert_eq!(free.map.cell((51, 44)).unwrap().cost, 100);
@@ -264,4 +271,41 @@ fn a_step_sideways_out_of_a_zone_costs_a_quarter_of_the_movement_more() {
     assert_eq!(held.map.cell((51, 44)).unwrap().cost, 250);
     // Back along the line: no penalty.
     assert_eq!(held.map.cell((50, 43)).unwrap().cost, 100);
+}
+
+#[test]
+fn the_sides_start_facing_each_other() {
+    let (state, a, t) = battle(open_field(), 1, (80, 50), (20, 50));
+    // The attackers stand in the far rows and face (-1, 0); the defenders face (1, 0).
+    assert_eq!(state.unit(a).unwrap().facing, 0);
+    assert_eq!(state.unit(t).unwrap().facing, 4);
+}
+
+#[test]
+fn a_walker_faces_its_last_step_and_a_flier_its_whole_way() {
+    // Walking around a wall of blocked cells: the last step decides.
+    let (mut state, a, _) = battle(open_field(), 1, (50, 40), (50, 70));
+    let report = move_unit(&mut state, a, (52, 42), &MoveRules::plain(1000), no_zones).unwrap();
+    let last = report.path[report.path.len() - 2];
+    let step = (report.to.0 - last.0, report.to.1 - last.1);
+    let expected = DIRECTIONS.iter().position(|d| *d == step).unwrap() as u8;
+    assert_eq!(state.unit(a).unwrap().facing, expected);
+
+    // A flier faces straight from where it stood to where it landed: (3, 1) is closest
+    // to direction 4, (1, 0).
+    let (mut state, a, _) = battle(open_field(), 1, (50, 40), (50, 70));
+    let flier = MoveRules { flies: true, ..MoveRules::plain(1000) };
+    move_unit(&mut state, a, (53, 41), &flier, no_zones).unwrap();
+    assert_eq!(state.unit(a).unwrap().facing, 4);
+}
+
+#[test]
+fn strikers_turn_toward_their_victims() {
+    // The target stands to the side of the attacker: (0, 1), direction 2, from it.
+    let (mut state, a, t) = battle(open_field(), 1, (50, 42), (50, 45));
+    approach_and_attack(&mut state, a, t, (50, 42), &MoveRules::plain(1000), no_zones, &MeleeContext::default()).unwrap();
+    assert_eq!(state.unit(a).unwrap().facing, 2);
+    // It answered, turning back toward the attacker: (0, -1), direction 6.
+    assert_eq!(state.unit(t).unwrap().facing, 6);
+    assert!(state.events().contains(&CombatEvent::Turned { unit: t, facing: 6 }));
 }

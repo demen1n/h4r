@@ -24,7 +24,7 @@ use crate::creatures::CreatureStats;
 use crate::random::{CombatDice, CombatRandom};
 
 /// Version of our JSON fixture, not the original game's saved-battle format.
-pub const SNAPSHOT_VERSION: u32 = 4;
+pub const SNAPSHOT_VERSION: u32 = 5;
 
 /// Stable within one battle. Also the occupant ID in the collision grid and the
 /// ID passed to combat dice. IDs are never vector indices or adventure army IDs.
@@ -82,6 +82,9 @@ pub struct BattleUnit {
     pub kind: UnitKind,
     /// None until deployment. It is never silently replaced by a guessed cell.
     pub position: Option<UnitPosition>,
+    /// Where it faces: a direction index of [`crate::battle::path::DIRECTIONS`] (the
+    /// combat actor's `+0x6c`). Zones of control are an arc in front of it.
+    pub facing: u8,
 }
 
 impl BattleUnit {
@@ -192,6 +195,11 @@ pub enum CombatEvent {
     Died {
         unit: UnitId,
     },
+    /// A unit turned to face another direction.
+    Turned {
+        unit: UnitId,
+        facing: u8,
+    },
     /// The active unit walked from one corner cell to another; `cost` is the
     /// path cost of the destination (the exe's "moved this turn").
     Moved {
@@ -230,6 +238,14 @@ struct BattleData {
 #[derive(Debug, Clone, PartialEq)]
 pub struct BattleState {
     data: BattleData,
+}
+
+/// Where a side faces when its creatures are made (`1eb050`).
+fn initial_facing(side: Side) -> u8 {
+    match side {
+        Side::Attacker => 0,
+        Side::Defender => 4,
+    }
 }
 
 fn side_index(side: Side) -> usize {
@@ -361,6 +377,10 @@ impl BattleState {
                     slot,
                     kind,
                     position: None,
+                    // The creature's constructor (`1eb050` → `1d5320`): the attackers
+                    // face direction 0, (-1, 0), the defenders 4, (1, 0) — toward
+                    // each other across the field.
+                    facing: initial_facing(side),
                 });
             }
             if army.slots.iter().all(Option::is_none) {
@@ -460,7 +480,7 @@ impl BattleState {
     /// Move the active unit's footprint corner to `to` (the move command in
     /// `battle::move_command` finds the place and the cost). The new cells must
     /// be free; on failure the field, the position and the log stay as they were.
-    pub(crate) fn relocate(&mut self, id: UnitId, to: (i32, i32), cost: u32) -> Result<(), String> {
+    pub(crate) fn relocate(&mut self, id: UnitId, to: (i32, i32), cost: u32, facing: u8) -> Result<(), String> {
         if self.data.turns.active != Some(id) {
             return Err("only the unit whose turn it is can move".into());
         }
@@ -485,7 +505,40 @@ impl BattleState {
             to,
             cost,
         });
+        self.turn(id, facing)
+    }
+
+    /// Turn a unit (`t_battlefield::set_current_direction` and its variant with an
+    /// action, `164250` / `1642a0`). Nothing is logged if it already faces that way.
+    /// Moves and strikes turn units themselves; this is for the rules that aren't ported
+    /// yet (shots, spells) and for fixtures.
+    pub fn turn(&mut self, id: UnitId, facing: u8) -> Result<(), String> {
+        if facing >= 8 {
+            return Err("a facing is a direction 0..8".into());
+        }
+        let unit = self
+            .data
+            .units
+            .iter_mut()
+            .find(|u| u.id == id)
+            .ok_or("unknown battle unit")?;
+        if unit.facing != facing {
+            unit.facing = facing;
+            self.data.events.push(CombatEvent::Turned { unit: id, facing });
+        }
         Ok(())
+    }
+
+    /// The direction from one unit's footprint center toward another's (`1684a0`: both
+    /// centers in 1/65536 of a cell, then the direction `11ede0`). Both must stand on
+    /// the field.
+    pub fn facing_toward(&self, who: UnitId, whom: UnitId) -> Result<u8, String> {
+        let center = |id: UnitId| -> Result<(i32, i32), String> {
+            let at = self.unit(id).and_then(|u| u.position).ok_or("the unit is not on the field")?;
+            let half = i32::from(at.size) * 0x8000;
+            Ok((at.at.0 * 0x10000 + half, at.at.1 * 0x10000 + half))
+        };
+        Ok(super::path_prepare::direction(center(who)?, center(whom)?) as u8)
     }
 
     /// Begin a round with an externally computed permutation of living units.
@@ -1052,7 +1105,7 @@ impl BattleState {
         let mut ids = BTreeSet::new();
         let mut slots = [[None; SLOTS]; 2];
         for unit in &data.units {
-            if unit.id.0 == 0 || !ids.insert(unit.id) || unit.slot >= SLOTS {
+            if unit.id.0 == 0 || !ids.insert(unit.id) || unit.slot >= SLOTS || unit.facing >= 8 {
                 return Err("invalid or duplicate battle unit identity".into());
             }
             if slots[side_index(unit.side)][unit.slot]
@@ -1355,7 +1408,8 @@ impl BattleState {
                 | CombatEvent::DamageApplied { unit, .. }
                 | CombatEvent::Killed { unit, .. }
                 | CombatEvent::Died { unit }
-                | CombatEvent::Moved { unit, .. } => ids.contains(unit),
+                | CombatEvent::Moved { unit, .. }
+                | CombatEvent::Turned { unit, .. } => ids.contains(unit),
                 CombatEvent::RoundStarted { order, .. } => order.iter().all(|id| ids.contains(id)),
                 CombatEvent::InitiativeStarted { state } => {
                     state.entries.iter().all(|entry| ids.contains(&entry.unit))

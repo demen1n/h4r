@@ -11,8 +11,7 @@
 //! direction except straight toward or away from each such enemy. A flier is held only by
 //! flying enemies; `ignore_zones_of_control` frees a creature from all of them.
 //!
-//! Where a creature faces is an input: the state doesn't keep it yet (the exe turns the
-//! creatures with their animations).
+//! Where a creature faces comes from the battle state ([`crate::battle::state::BattleUnit::facing`]).
 
 use std::collections::HashMap;
 
@@ -179,8 +178,6 @@ pub fn zone_directions(map: &ThreatMap, threats: &[Threat], mover: ZoneMover, at
 /// What the state doesn't know about a unit, for zones of control.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ZoneTraits {
-    /// Where it faces (a direction index).
-    pub facing: u32,
     pub long_weapon: bool,
     pub hydra_strike: bool,
     /// No effect 7, and ability `flying` or effect 0x2e.
@@ -191,8 +188,8 @@ pub struct ZoneTraits {
 
 /// The zone-of-control directions for `mover` on this battle, as the path search asks for
 /// them (`zone` of [`crate::battle::move_command::move_unit`]): every unit on the field is a
-/// threat (in unit order; a stack is alive while it has creatures, a hero always), `traits`
-/// gives what the state doesn't keep.
+/// threat (in unit order; a stack is alive while it has creatures, a hero always) facing
+/// the way the state says; `traits` gives the abilities and effects.
 pub fn zones_for(
     state: &BattleState,
     mover: UnitId,
@@ -216,7 +213,7 @@ pub fn zones_for(
                 },
                 position: (at.at.0 * 16, at.at.1 * 16),
                 size: i32::from(at.size),
-                facing: t.facing,
+                facing: u32::from(u.facing),
                 long_weapon: t.long_weapon,
                 hydra_strike: t.hydra_strike,
                 flies: t.flies,

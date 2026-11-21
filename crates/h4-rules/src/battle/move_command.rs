@@ -37,7 +37,7 @@
 use crate::battle::attack_angles::{attack_positions, AngleAttacker, AngleTarget, AttackPosition};
 use crate::battle::melee_command::{melee_attack, MeleeContext, MeleeReport};
 use crate::battle::path::{flags, Mover, PathSearch};
-use crate::battle::path_prepare::{prepare, FieldObject, FieldObjectKind, GateState, PrepareInput, PreparedMover};
+use crate::battle::path_prepare::{direction, prepare, FieldObject, FieldObjectKind, GateState, PrepareInput, PreparedMover};
 use crate::battle::path_template::{template, BlockageMap, Blocker, BlockerKind};
 use crate::battle::state::{BattleState, BattleUnit, UnitId};
 use crate::battlefield::{BattlefieldGrid, FLAG_BLOCKED};
@@ -256,7 +256,7 @@ pub fn move_unit(
         return Err("only the unit whose turn it is can move".into());
     }
     let search = search_for(state, id, rules, zone)?;
-    walk(state, id, &search, target, rules.movement)
+    walk(state, id, &search, target, rules)
 }
 
 /// What [`approach_and_attack`] did.
@@ -311,12 +311,12 @@ pub fn approach_and_attack(
         return Ok(AttackOrder::Attacked { walked: None, melee });
     }
     if rules.movement < 0 || cell.cost > rules.movement as u32 {
-        let report = walk(state, attacker, &search, stand_at, rules.movement)?;
+        let report = walk(state, attacker, &search, stand_at, rules)?;
         return Ok(AttackOrder::Approached(report));
     }
     // Strike only if the walk worked: on a failed attack the walk is undone.
     let before = state.clone();
-    let report = walk_to(state, attacker, &search, stand_at)?;
+    let report = walk_to(state, attacker, &search, stand_at, rules)?;
     match strike(state, report.cost) {
         Ok(melee) => Ok(AttackOrder::Attacked { walked: Some(report), melee }),
         Err(error) => {
@@ -327,17 +327,22 @@ pub fn approach_and_attack(
 }
 
 /// Walk toward `target` on a finished search: the stop of `16c4a0`, then the move.
-fn walk(state: &mut BattleState, id: UnitId, search: &PathSearch, target: (i32, i32), movement: i32) -> Result<MoveReport, String> {
+fn walk(state: &mut BattleState, id: UnitId, search: &PathSearch, target: (i32, i32), rules: &MoveRules) -> Result<MoveReport, String> {
+    let movement = rules.movement;
     let to = destination(search, target, movement).ok_or("the target cannot be reached")?;
     let cell = search.map.cell(to).expect("a path point is on the map");
     if cell.cost > movement as u32 || cell.flags & flags::OCCUPIED != 0 {
         return Err("no point of the path can be reached this turn".into());
     }
-    walk_to(state, id, search, to)
+    walk_to(state, id, search, to, rules)
 }
 
-/// Move to a reached cell of a finished search (`16c300`).
-fn walk_to(state: &mut BattleState, id: UnitId, search: &PathSearch, to: (i32, i32)) -> Result<MoveReport, String> {
+/// Move to a reached cell of a finished search (`16c300`). The unit ends up facing the
+/// way it went: a walker the direction of its last step (the walk animation turns it
+/// at every step to the direction in the path point, `3def70`); a flier or a teleporter
+/// straight from where it stood to where it lands (`t_play_combat_flight` `3dd6f0` with
+/// `11ee50`, the teleport `47e2a0` with `11ede0`).
+fn walk_to(state: &mut BattleState, id: UnitId, search: &PathSearch, to: (i32, i32), rules: &MoveRules) -> Result<MoveReport, String> {
     let from = state
         .unit(id)
         .and_then(|u| u.position)
@@ -346,7 +351,12 @@ fn walk_to(state: &mut BattleState, id: UnitId, search: &PathSearch, to: (i32, i
     let cost = search.map.cell(to).ok_or("the target is off the field")?.cost;
     let mut path = search.path_to(to).ok_or("the target cannot be reached")?;
     path.reverse();
-    state.relocate(id, to, cost)?;
+    let facing = if rules.flies || rules.teleports {
+        direction((from.0 * 16, from.1 * 16), (to.0 * 16, to.1 * 16))
+    } else {
+        search.map.cell(to).expect("checked above").direction()
+    };
+    state.relocate(id, to, cost, facing as u8)?;
     Ok(MoveReport { unit: id, from, to, path, cost })
 }
 

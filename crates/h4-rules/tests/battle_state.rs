@@ -291,6 +291,9 @@ fn snapshots_reject_corrupt_cross_references_geometry_hp_and_rng() {
     assert!(matches!(state.events()[4], CombatEvent::Rolled { .. }));
     let edits = [
         ("/version", serde_json::json!(999)),
+        // v4 had no facing.
+        ("/version", serde_json::json!(4)),
+        ("/units/0/facing", serde_json::json!(8)),
         ("/armies/1/source", serde_json::json!(10)),
         ("/armies/0/slots/0", serde_json::json!(999)),
         ("/units/0/id", serde_json::json!(0)),

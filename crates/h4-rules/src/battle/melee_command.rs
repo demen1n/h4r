@@ -202,6 +202,9 @@ pub fn melee_attack(
     let simultaneous = rolled.len() == 2;
     if simultaneous {
         // Both roll against the stacks as they stand, then both are applied.
+        // Each striker turns toward its victim (`16e520` → `1684a0`).
+        face(state, attacker, target)?;
+        face(state, target, attacker)?;
         let a = fighter(state, attacker, &ctx.attacker)?;
         let t = fighter(state, target, &ctx.target)?;
         let by_attacker = roll_strike(state, &a, &t, ctx.moved);
@@ -261,6 +264,7 @@ fn strike(
     if !state.unit(from).is_some_and(|u| u.alive()) || !state.unit(to).is_some_and(|u| u.alive()) {
         return Ok(());
     }
+    face(state, from, to)?;
     let f = fighter(state, from, from_rules)?;
     let t = fighter(state, to, to_rules)?;
     let damage = roll_strike(state, &f, &t, moved);
@@ -268,6 +272,13 @@ fn strike(
     let losses = state.apply_damage(t.id)?;
     report.strikes.push(StrikeReport { by, retaliation, damage: accepted, losses });
     Ok(())
+}
+
+/// A striker turns toward its victim before the blow: the strike animation (`16e520`)
+/// takes the direction from the striker's center to the victim's (`1684a0`).
+fn face(state: &mut BattleState, who: UnitId, whom: UnitId) -> Result<(), String> {
+    let facing = state.facing_toward(who, whom)?;
+    state.turn(who, facing)
 }
 
 /// The attacker's further strikes: nobody answers them.
