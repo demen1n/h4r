@@ -15,11 +15,10 @@
 //!   costs 500 and then walks on through blocked cells for a few half-steps (the reach of a
 //!   large creature or a `long_weapon`).
 //!
-//! What this module does **not** do yet is prepare the map: copying the cached template,
-//! marking cells under creatures, gates, walls and towers, the terrain costs and the start
-//! points of a creature in a tower (`20c7f0`). The caller gives a ready [`PathMap`] and
-//! seeds the start with [`PathSearch::seed_start`]. The zone-of-control directions
-//! (`172210`, issue #63) are also given by the caller.
+//! The map is prepared elsewhere ([`crate::battle::path_template`],
+//! [`crate::battle::path_prepare`]); the move command on a battle is
+//! [`crate::battle::move_command`]. The zone-of-control directions (`172210`, issue #63)
+//! are given by the caller.
 
 use crate::battlefield::CombatFootprint;
 
