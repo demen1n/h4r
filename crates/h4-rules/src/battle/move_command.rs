@@ -23,10 +23,15 @@
 //! - the combat terrain map and the creature's terrain costs (#182);
 //! - the zone-of-control directions (`172210`, #63), a closure for [`move_unit`].
 //!
+//! The melee order with an approach ([`approach_and_attack`], `16b850`) builds on the
+//! same steps; which cells count as attack positions next to the target (the attack
+//! angle list, `50c870`) is not ported, so the caller picks the cell.
+//!
 //! Not supported yet: castles (gates, walls and towers are not in the state), a start in a
 //! tower, cowardice and effect 0x89 (they matter only when the path is searched for an
 //! attack, which a plain move doesn't do).
 
+use crate::battle::melee_command::{melee_attack, MeleeContext, MeleeReport};
 use crate::battle::path::{flags, Mover, PathSearch};
 use crate::battle::path_prepare::{prepare, FieldObject, FieldObjectKind, GateState, PrepareInput, PreparedMover};
 use crate::battle::path_template::{template, BlockageMap, Blocker, BlockerKind};
@@ -219,19 +224,95 @@ pub fn move_unit(
     if state.turns().active != Some(id) {
         return Err("only the unit whose turn it is can move".into());
     }
+    let search = search_for(state, id, rules, zone)?;
+    walk(state, id, &search, target, rules.movement)
+}
+
+/// What [`approach_and_attack`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AttackOrder {
+    /// The attacker struck: after walking to the attack position (`walked`), or right
+    /// where it stood (`None`).
+    Attacked { walked: Option<MoveReport>, melee: MeleeReport },
+    /// The attack position was beyond the movement: the attacker only walked toward it,
+    /// as far as it could, and didn't strike.
+    Approached(MoveReport),
+}
+
+/// The player's melee order with an approach (`16b850`): the active unit is to strike
+/// `target` from the footprint corner `stand_at`. The path cost of `stand_at` decides:
+/// - 0 (the unit stands there already): strike in place; "moved" is 0, because the exe
+///   clears it when a unit's turn begins (`167db4`);
+/// - more than the movement: walk toward it as far as the movement goes and don't strike
+///   (`16c590`, the same stop as [`move_unit`]);
+/// - otherwise: walk there (`16c300`; "moved" = that cost), then strike.
+///
+/// `stand_at` must be an attack position next to the target — the exe's interface only
+/// offers those (the attack angle list, `50c870`, not ported); it isn't checked here.
+/// `melee` gives the rest of the strike's inputs; its `moved` is replaced. The turn stays
+/// active either way. A cell the search didn't reach is an error (the exe would read a
+/// zero cost from the template and strike in place).
+pub fn approach_and_attack(
+    state: &mut BattleState,
+    attacker: UnitId,
+    target: UnitId,
+    stand_at: (i32, i32),
+    rules: &MoveRules,
+    zone: impl FnMut((i32, i32)) -> [bool; 8],
+    melee: &MeleeContext,
+) -> Result<AttackOrder, String> {
+    if state.turns().active != Some(attacker) {
+        return Err("only the unit whose turn it is can attack".into());
+    }
+    let search = search_for(state, attacker, rules, zone)?;
+    let cell = *search.map.cell(stand_at).ok_or("the attack position is off the field")?;
+    if cell.flags & flags::REACHED == 0 {
+        return Err("the attack position cannot be reached".into());
+    }
+    let strike = |state: &mut BattleState, moved: u32| {
+        let context = MeleeContext { moved: moved as i32, ..melee.clone() };
+        melee_attack(state, attacker, target, &context)
+    };
+    if cell.cost < 1 {
+        let melee = strike(state, 0)?;
+        return Ok(AttackOrder::Attacked { walked: None, melee });
+    }
+    if rules.movement < 0 || cell.cost > rules.movement as u32 {
+        let report = walk(state, attacker, &search, stand_at, rules.movement)?;
+        return Ok(AttackOrder::Approached(report));
+    }
+    // Strike only if the walk worked: on a failed attack the walk is undone.
+    let before = state.clone();
+    let report = walk_to(state, attacker, &search, stand_at)?;
+    match strike(state, report.cost) {
+        Ok(melee) => Ok(AttackOrder::Attacked { walked: Some(report), melee }),
+        Err(error) => {
+            *state = before;
+            Err(error)
+        }
+    }
+}
+
+/// Walk toward `target` on a finished search: the stop of `16c4a0`, then the move.
+fn walk(state: &mut BattleState, id: UnitId, search: &PathSearch, target: (i32, i32), movement: i32) -> Result<MoveReport, String> {
+    let to = destination(search, target, movement).ok_or("the target cannot be reached")?;
+    let cell = search.map.cell(to).expect("a path point is on the map");
+    if cell.cost > movement as u32 || cell.flags & flags::OCCUPIED != 0 {
+        return Err("no point of the path can be reached this turn".into());
+    }
+    walk_to(state, id, search, to)
+}
+
+/// Move to a reached cell of a finished search (`16c300`).
+fn walk_to(state: &mut BattleState, id: UnitId, search: &PathSearch, to: (i32, i32)) -> Result<MoveReport, String> {
     let from = state
         .unit(id)
         .and_then(|u| u.position)
         .ok_or("the unit is not on the field")?
         .at;
-    let search = search_for(state, id, rules, zone)?;
-    let to = destination(&search, target, rules.movement).ok_or("the target cannot be reached")?;
-    let cell = *search.map.cell(to).expect("a path point is on the map");
-    if cell.cost > rules.movement as u32 || cell.flags & flags::OCCUPIED != 0 {
-        return Err("no point of the path can be reached this turn".into());
-    }
-    let mut path = search.path_to(to).expect("a point of a found path is reached");
+    let cost = search.map.cell(to).ok_or("the target is off the field")?.cost;
+    let mut path = search.path_to(to).ok_or("the target cannot be reached")?;
     path.reverse();
-    state.relocate(id, to, cell.cost)?;
-    Ok(MoveReport { unit: id, from, to, path, cost: cell.cost })
+    state.relocate(id, to, cost)?;
+    Ok(MoveReport { unit: id, from, to, path, cost })
 }

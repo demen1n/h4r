@@ -2,7 +2,8 @@
 //! stopping point when the movement runs out, and the state after the move.
 //! Uses fixture stats, no game data.
 
-use h4_rules::battle::move_command::{destination, move_unit, search_for, MoveRules};
+use h4_rules::battle::melee_command::MeleeContext;
+use h4_rules::battle::move_command::{approach_and_attack, destination, move_unit, search_for, AttackOrder, MoveRules};
 use h4_rules::battle::state::{BattleState, CombatEvent, UnitId, UnitPosition};
 use h4_rules::battlefield::{BattlefieldGrid, CellSurface, FLAG_BLOCKED};
 use h4_rules::creatures::CreatureStats;
@@ -161,4 +162,51 @@ fn a_zone_of_control_makes_steps_dearer() {
     // Every step pays a quarter of the movement extra: 100 + 1000 / 4 = 350 a step.
     let report = move_unit(&mut state, a, (50, 42), &MoveRules::plain(1000), |_| [true; 8]).unwrap();
     assert_eq!(report.cost, 700);
+}
+
+fn hit_points(state: &BattleState, id: UnitId) -> i32 {
+    state.unit(id).unwrap().total_hits().unwrap()
+}
+
+#[test]
+fn an_attack_from_where_the_unit_stands_moves_nothing() {
+    let (mut state, a, t) = battle(open_field(), 1, (50, 44), (50, 45));
+    let order = approach_and_attack(&mut state, a, t, (50, 44), &MoveRules::plain(1000), no_zones, &MeleeContext::default()).unwrap();
+    let AttackOrder::Attacked { walked: None, melee } = order else { panic!("{order:?}") };
+    assert!(!melee.strikes.is_empty());
+    assert!(hit_points(&state, t) < 100);
+    assert!(!state.events().iter().any(|e| matches!(e, CombatEvent::Moved { .. })));
+}
+
+#[test]
+fn an_attack_position_within_reach_is_walked_to_and_the_target_struck() {
+    let (mut state, a, t) = battle(open_field(), 1, (50, 40), (50, 45));
+    let order = approach_and_attack(&mut state, a, t, (50, 44), &MoveRules::plain(1000), no_zones, &MeleeContext::default()).unwrap();
+    let AttackOrder::Attacked { walked: Some(walk), melee } = order else { panic!("{order:?}") };
+    assert_eq!((walk.to, walk.cost), ((50, 44), 400));
+    assert!(!melee.strikes.is_empty());
+    assert!(hit_points(&state, t) < 100);
+    assert_eq!(state.unit(a).unwrap().position.unwrap().at, (50, 44));
+}
+
+#[test]
+fn an_attack_position_beyond_the_movement_is_only_approached() {
+    let (mut state, a, t) = battle(open_field(), 1, (50, 40), (50, 50));
+    let order = approach_and_attack(&mut state, a, t, (50, 49), &MoveRules::plain(500), no_zones, &MeleeContext::default()).unwrap();
+    let AttackOrder::Approached(walk) = order else { panic!("{order:?}") };
+    assert_eq!((walk.to, walk.cost), ((50, 45), 500));
+    assert_eq!(hit_points(&state, t), 100);
+}
+
+#[test]
+fn an_unreached_attack_position_is_an_error() {
+    let mut field = open_field();
+    // Wall the target in: the cell next to it can't be reached.
+    for (x, y) in [(49, 49), (49, 50), (49, 51), (50, 49), (50, 51), (51, 49), (51, 50), (51, 51)] {
+        field.surface_mut(x, y).unwrap().flags |= FLAG_BLOCKED;
+    }
+    let (mut state, a, t) = battle(field, 1, (50, 40), (60, 60));
+    let before = state.clone();
+    assert!(approach_and_attack(&mut state, a, t, (50, 50), &MoveRules::plain(3000), no_zones, &MeleeContext::default()).is_err());
+    assert_eq!(state, before);
 }
