@@ -293,16 +293,23 @@ fn seed_exits(search: &mut PathSearch, from: (i32, i32), rect: (i32, i32, i32, i
 }
 
 /// The direction from one cell to another as an index into
-/// [`crate::battle::path::DIRECTIONS`] (`51ede0`): the angle in whole degrees
-/// (x87 `atan2`, truncated), then eight sectors of 45° centered on the directions.
+/// [`crate::battle::path::DIRECTIONS`] (`51ede0`): the [`angle`] to it, then eight
+/// sectors of 45° centered on the directions.
 pub fn direction(from: (i32, i32), to: (i32, i32)) -> u32 {
+    let turned = angle((to.0 - from.0, to.1 - from.1));
+    (((2 * turned + 45) / 90) & 7) as u32
+}
+
+/// The angle of a vector (rows, columns) in whole degrees, 0..360 (`11ed40`, and the
+/// same arithmetic inside `51ede0`): x87 `atan2` in degrees, truncated, then turned.
+/// Direction 0 (north-east, one row up) is 0°; the angle grows clockwise on screen.
+pub fn angle(d: (i32, i32)) -> i32 {
     // The exe negates the row difference as an integer before loading it: no -0.0, so
-    // the direction to the cell itself is 0, not 4.
-    let rows = f64::from((to.0 - from.0).wrapping_neg());
-    let columns = f64::from(to.1 - from.1);
+    // the angle of (0, 0) is 0, not 180.
+    let rows = f64::from(d.0.wrapping_neg());
+    let columns = f64::from(d.1);
     // atan2(columns, -rows), in degrees with the exe's sign: × -180 / π, then __ftol
     // (truncation toward zero).
-    let angle = (columns.atan2(rows) * -180.0 / std::f64::consts::PI) as i32;
-    let turned = (360 - angle) % 360;
-    (((2 * turned + 45) / 90) & 7) as u32
+    let degrees = (columns.atan2(rows) * -180.0 / std::f64::consts::PI) as i32;
+    (360 - degrees) % 360
 }

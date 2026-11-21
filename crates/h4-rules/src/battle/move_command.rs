@@ -24,13 +24,14 @@
 //! - the zone-of-control directions (`172210`, #63), a closure for [`move_unit`].
 //!
 //! The melee order with an approach ([`approach_and_attack`], `16b850`) builds on the
-//! same steps; which cells count as attack positions next to the target (the attack
-//! angle list, `50c870`) is not ported, so the caller picks the cell.
+//! same steps; the cell to strike from must be one of the target's attack positions
+//! ([`attack_positions_against`], `10c870`).
 //!
 //! Not supported yet: castles (gates, walls and towers are not in the state), a start in a
 //! tower, cowardice and effect 0x89 (they matter only when the path is searched for an
 //! attack, which a plain move doesn't do).
 
+use crate::battle::attack_angles::{attack_positions, AngleAttacker, AngleTarget, AttackPosition};
 use crate::battle::melee_command::{melee_attack, MeleeContext, MeleeReport};
 use crate::battle::path::{flags, Mover, PathSearch};
 use crate::battle::path_prepare::{prepare, FieldObject, FieldObjectKind, GateState, PrepareInput, PreparedMover};
@@ -247,9 +248,8 @@ pub enum AttackOrder {
 ///   (`16c590`, the same stop as [`move_unit`]);
 /// - otherwise: walk there (`16c300`; "moved" = that cost), then strike.
 ///
-/// `stand_at` must be an attack position next to the target — the exe's interface only
-/// offers those (the attack angle list, `50c870`, not ported); it isn't checked here.
-/// `melee` gives the rest of the strike's inputs; its `moved` is replaced. The turn stays
+/// `stand_at` must be one of the target's attack positions ([`attack_positions_against`]):
+/// the exe's interface and AI only offer those. `melee` gives the rest of the strike's inputs; its `moved` is replaced. The turn stays
 /// active either way. A cell the search didn't reach is an error (the exe would read a
 /// zero cost from the template and strike in place).
 pub fn approach_and_attack(
@@ -265,6 +265,9 @@ pub fn approach_and_attack(
         return Err("only the unit whose turn it is can attack".into());
     }
     let search = search_for(state, attacker, rules, zone)?;
+    if !positions_on(state, &search, attacker, target, rules)?.iter().any(|p| p.at == stand_at) {
+        return Err("not an attack position against this target".into());
+    }
     let cell = *search.map.cell(stand_at).ok_or("the attack position is off the field")?;
     if cell.flags & flags::REACHED == 0 {
         return Err("the attack position cannot be reached".into());
@@ -315,4 +318,45 @@ fn walk_to(state: &mut BattleState, id: UnitId, search: &PathSearch, to: (i32, i
     path.reverse();
     state.relocate(id, to, cost)?;
     Ok(MoveReport { unit: id, from, to, path, cost })
+}
+
+/// The places the active unit may strike `target` from (`10c870` on the unit's path
+/// search without attack mode, as the interface asks for them): sorted by angle, each
+/// with its corner, distance and path cost. A creature target is a single part, and its
+/// virtual `+0x3c` is false (`f140`). Effects 0x90 and 0x89 aren't in the state yet.
+pub fn attack_positions_against(
+    state: &BattleState,
+    attacker: UnitId,
+    target: UnitId,
+    rules: &MoveRules,
+    zone: impl FnMut((i32, i32)) -> [bool; 8],
+) -> Result<Vec<AttackPosition>, String> {
+    let search = search_for(state, attacker, rules, zone)?;
+    positions_on(state, &search, attacker, target, rules)
+}
+
+fn positions_on(
+    state: &BattleState,
+    search: &PathSearch,
+    attacker: UnitId,
+    target: UnitId,
+    rules: &MoveRules,
+) -> Result<Vec<AttackPosition>, String> {
+    let size = |id: UnitId| state.unit(id).and_then(|u| u.position).ok_or("the unit is not on the field");
+    let (own, other) = (size(attacker)?, size(target)?);
+    Ok(attack_positions(
+        &search.map,
+        AngleAttacker {
+            size: i32::from(own.size),
+            movement: rules.movement,
+            long_weapon: rules.long_weapon,
+            effect_90: false,
+        },
+        AngleTarget {
+            position: (other.at.0 * 16, other.at.1 * 16),
+            size: i32::from(other.size),
+            slot_3c: false,
+            effect_89: false,
+        },
+    ))
 }
