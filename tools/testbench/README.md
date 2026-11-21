@@ -391,3 +391,15 @@ Boundaries: the path finder's search (a no-op, its map is supplied searched), th
 battlefield's row table, and the virtual accessors of the attacker (size, movement,
 `long_weapon`, effect 0x90) and of the target (its part list, slot `+0x3c`, effect 0x89).
 Single-part targets outside towers only.
+
+```sh
+.venv/bin/python tools/testbench/combat_path_stop.py --exe bin/heroes4.exe \
+  --out crates/h4-rules/tests/combat_path_stop_vectors.tsv
+```
+
+`combat_path_stop.py`: on top of the path search bench (the real `20d200` on its random
+maps), 400 maps with the stop of a moving creature (`16c4a0`) and the turns to reach a cell
+(`171340`) for targets picked after the search, through the real path rebuild with the
+vector of points (`20e7b0`). Extra boundary: the creature's path finder (`1f7680`). `16c4a0`
+is asked only about reached cells other than the start (otherwise the exe reads a point
+through a null pointer).
