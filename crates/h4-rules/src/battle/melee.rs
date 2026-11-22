@@ -10,7 +10,9 @@
 //!   forgotten again (rva `1f6b20`, `1f6b60` and the round reset `1ecfb0`);
 //! - [`plan_melee_attack`] — who strikes first, whether the two strikes happen at
 //!   the same time, and what the battle does after the strike animation
-//!   (start of a melee attack, a `t_battlefield` method, rva `16ede0`).
+//!   (start of a melee attack, a `t_battlefield` method, rva `16ede0`);
+//! - [`plan_ranged_attack`] — whether a shot is answered by a shot, and when
+//!   (start of a ranged attack, rva `1693d0`; read from the disassembly only).
 //!
 //! What a strike does (dice, damage, losses) is not here: that is `damage` and
 //! `wounds`. Connecting these rules to `BattleState` is the next step.
@@ -21,6 +23,7 @@ pub mod abilities {
     pub const EXTRA_RANGED_ATTACK: u8 = 0x13;
     pub const FIRST_STRIKE: u8 = 0x17;
     pub const FIRST_STRIKE_IMMUNITY: u8 = 0x18;
+    pub const RANGED_FIRST_STRIKE: u8 = 0x34;
     pub const SHOOTS_TWICE: u8 = 0x3b;
     pub const STRIKES_TWICE: u8 = 0x46;
     pub const UNLIMITED_RETALIATION: u8 = 0x4e;
@@ -254,6 +257,66 @@ pub fn plan_melee_attack(s: &MeleeSituation) -> MeleePlan {
     }
 }
 
+/// Everything [`plan_ranged_attack`] looks at, resolved by the caller.
+#[derive(Debug, Clone, Default)]
+pub struct RangedSituation<'a> {
+    /// The target's retaliation flag is set (byte `+0xa9`). Unlike the melee check
+    /// (`1f23c0`) the shot start reads it alone, with no `n < 2` exception.
+    pub target_retaliated: bool,
+    /// The target could shoot now: `retaliation::can_shoot` (ranged ability, no
+    /// effect 0x2f, shots left, no threat count).
+    pub target_can_shoot: bool,
+    /// The target is alive and has none of the effects 0x0b, 0xba, 0x9a (rva `155ea0`).
+    pub target_can_act: bool,
+    pub attacker_abilities: &'a [u8],
+    pub target_abilities: &'a [u8],
+}
+
+/// How a shot is answered (rva `1693d0`, `decomp/return_fire.md`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReturnFire {
+    /// No answer: the attacker makes all its shots.
+    None,
+    /// The target shoots back at once (rva `168d00` right after the attacker's
+    /// hit): both shots roll before any loss, so the target answers with its whole
+    /// stack. Then the attacker's remaining shots, unanswered.
+    Simultaneous,
+    /// The attacker's first shot lands first; after its losses the target shoots
+    /// back if both stacks still stand and it can act (rva `169ca0`). Then the
+    /// remaining shots. Happens with `ranged_first_strike` on the attacker only,
+    /// or when the target can't act (then the later check finds it still can't).
+    AfterFirstShot,
+}
+
+/// Decide the answer to a shot, as the exe's shot start does (rva `1693d0`).
+///
+/// ```text
+/// no answer if: target retaliated, or it can't shoot
+/// a_first = attacker has ranged_first_strike (0x34)
+/// d_first = target   has ranged_first_strike
+/// if target can't act: a_first = true, d_first = false
+/// a_first and not d_first -> AfterFirstShot, otherwise Simultaneous
+/// ```
+///
+/// `first_strike_immunity` plays no part here, and the target's own
+/// `ranged_first_strike` only cancels the attacker's: the target never shoots first.
+pub fn plan_ranged_attack(s: &RangedSituation) -> ReturnFire {
+    if s.target_retaliated || !s.target_can_shoot {
+        return ReturnFire::None;
+    }
+    let mut attacker_first = s.attacker_abilities.contains(&abilities::RANGED_FIRST_STRIKE);
+    let mut target_first = s.target_abilities.contains(&abilities::RANGED_FIRST_STRIKE);
+    if !s.target_can_act {
+        attacker_first = true;
+        target_first = false;
+    }
+    if attacker_first && !target_first {
+        ReturnFire::AfterFirstShot
+    } else {
+        ReturnFire::Simultaneous
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -271,6 +334,29 @@ mod tests {
         assert!(plan.strikes.iter().all(|s| !s.sequential));
         assert_eq!(plan.then, Continuation::EndMeleeAttack { strikes_left: 0 });
         assert_eq!(plan.mark_retaliated, Some(true));
+    }
+
+    #[test]
+    fn a_shot_is_answered_at_once_unless_the_attacker_shoots_first() {
+        let answer = |retaliated, can_shoot, can_act, a: &[u8], t: &[u8]| {
+            plan_ranged_attack(&RangedSituation {
+                target_retaliated: retaliated,
+                target_can_shoot: can_shoot,
+                target_can_act: can_act,
+                attacker_abilities: a,
+                target_abilities: t,
+            })
+        };
+        let first = [abilities::RANGED_FIRST_STRIKE];
+        assert_eq!(answer(false, true, true, &[], &[]), ReturnFire::Simultaneous);
+        assert_eq!(answer(true, true, true, &[], &[]), ReturnFire::None);
+        assert_eq!(answer(false, false, true, &[], &[]), ReturnFire::None);
+        assert_eq!(answer(false, true, true, &first, &[]), ReturnFire::AfterFirstShot);
+        // Both shoot first: they cancel out.
+        assert_eq!(answer(false, true, true, &first, &first), ReturnFire::Simultaneous);
+        // The target's own first strike changes nothing.
+        assert_eq!(answer(false, true, true, &[], &first), ReturnFire::Simultaneous);
+        assert_eq!(answer(false, true, false, &[], &first), ReturnFire::AfterFirstShot);
     }
 
     #[test]

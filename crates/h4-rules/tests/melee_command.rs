@@ -2,7 +2,9 @@
 //! flag, extra strikes and snapshot replay. Uses fixture stats, no game data.
 
 use h4_rules::battle::melee::Striker;
-use h4_rules::battle::melee_command::{melee_attack, shoot, MeleeContext, ShotContext, StackRules, UNLIMITED_SHOTS};
+use h4_rules::battle::melee_command::{
+    melee_attack, ranged_attack, shoot, MeleeContext, RangedContext, ShotContext, StackRules, UNLIMITED_SHOTS,
+};
 use h4_rules::battle::state::{BattleState, UnitId, UnitPosition};
 use h4_rules::battlefield::{BattlefieldGrid, CellSurface};
 use h4_rules::creatures::CreatureStats;
@@ -236,4 +238,128 @@ fn a_shooter_turns_toward_its_target_before_the_damage() {
     let turned = events.iter().position(|e| matches!(e, CombatEvent::Turned { unit, facing: 4 } if *unit == a));
     let rolled = events.iter().position(|e| matches!(e, CombatEvent::Rolled { .. }));
     assert!(turned.unwrap() < rolled.unwrap());
+}
+
+// A whole ranged attack: the target shooting back (`decomp/return_fire.md`).
+
+const RANGED: u8 = 0x33;
+const RANGED_FIRST_STRIKE: u8 = 0x34;
+const SHOOTS_TWICE: u8 = 0x3b;
+const UNLIMITED_RETALIATION: u8 = 0x4e;
+
+fn shooter(extra: &[u8]) -> StackRules {
+    let mut abilities = vec![RANGED];
+    abilities.extend_from_slice(extra);
+    StackRules { abilities, ..Default::default() }
+}
+
+fn exchange(attacker: StackRules, target: StackRules) -> RangedContext {
+    RangedContext { attacker, target, penalty: 1, return_penalty: 1, ..Default::default() }
+}
+
+#[test]
+fn a_shooter_shoots_back_at_once_with_its_whole_stack() {
+    let (mut state, a, t) = battle(20, 20);
+    let report = ranged_attack(&mut state, a, t, &exchange(shooter(&[]), shooter(&[]))).unwrap();
+    assert_eq!(report.shots.len(), 2);
+    assert_eq!(report.shots[0].strike.by, Striker::Attacker);
+    assert_eq!(report.shots[1].strike.by, Striker::Defender);
+    assert!(report.shots[1].strike.retaliation);
+    assert!(report.shots[1].strike.damage > 0);
+    assert!(state.retaliation_flag(t).unwrap().retaliated);
+    // Each side spent one shot.
+    assert_eq!((shots_left(&state, a), shots_left(&state, t)), (7, 7));
+}
+
+#[test]
+fn the_simultaneous_answer_rolls_against_the_stack_before_losses() {
+    // A huge attacker would leave the target with almost nothing; the answer is still
+    // as strong as from an untouched target.
+    let (mut state, a, t) = battle(400, 20);
+    let report = ranged_attack(&mut state, a, t, &exchange(shooter(&[]), shooter(&[]))).unwrap();
+    assert_eq!(report.shots.len(), 2);
+    assert!(!state.unit(t).unwrap().alive());
+    assert!(report.shots[1].strike.damage >= 20 * 2, "20 creatures roll at least 2 each");
+}
+
+#[test]
+fn only_one_shot_back_a_round_and_none_without_the_ranged_ability() {
+    let (mut state, a, t) = battle(200, 200);
+    let ctx = exchange(shooter(&[]), shooter(&[]));
+    assert_eq!(ranged_attack(&mut state, a, t, &ctx).unwrap().shots.len(), 2);
+    assert_eq!(ranged_attack(&mut state, a, t, &ctx).unwrap().shots.len(), 1);
+
+    let (mut state, a, t) = battle(200, 200);
+    let melee_target = exchange(shooter(&[]), StackRules::default());
+    assert_eq!(ranged_attack(&mut state, a, t, &melee_target).unwrap().shots.len(), 1);
+    assert!(!state.retaliation_flag(t).unwrap().retaliated);
+
+    // A threatened shooter doesn't shoot back.
+    let (mut state, a, t) = battle(200, 200);
+    let threatened = RangedContext { target_threats: 1, ..exchange(shooter(&[]), shooter(&[])) };
+    assert_eq!(ranged_attack(&mut state, a, t, &threatened).unwrap().shots.len(), 1);
+}
+
+#[test]
+fn unlimited_retaliation_keeps_shooting_back() {
+    let (mut state, a, t) = battle(200, 200);
+    let ctx = exchange(shooter(&[]), shooter(&[UNLIMITED_RETALIATION]));
+    for _ in 0..3 {
+        assert_eq!(ranged_attack(&mut state, a, t, &ctx).unwrap().shots.len(), 2);
+    }
+    assert!(!state.retaliation_flag(t).unwrap().retaliated);
+}
+
+#[test]
+fn ranged_first_strike_lands_before_the_answer() {
+    // The attacker's first shot kills the target: no answer.
+    let (mut state, a, t) = battle(400, 5);
+    let ctx = exchange(shooter(&[RANGED_FIRST_STRIKE]), shooter(&[]));
+    let report = ranged_attack(&mut state, a, t, &ctx).unwrap();
+    assert_eq!(report.shots.len(), 1);
+    assert!(!state.unit(t).unwrap().alive());
+    assert_eq!(state.unit(a).unwrap().total_hits(), Some(4000));
+
+    // The target survives: it answers after its losses.
+    let (mut state, a, t) = battle(5, 200);
+    let report = ranged_attack(&mut state, a, t, &ctx).unwrap();
+    assert_eq!(report.shots.len(), 2);
+    assert!(report.shots[1].strike.retaliation);
+    assert!(report.shots[0].strike.losses.killed > 0 || report.shots[0].strike.damage > 0);
+
+    // Both shoot first: back to the simultaneous answer.
+    let (mut state, a, t) = battle(400, 5);
+    let both = exchange(shooter(&[RANGED_FIRST_STRIKE]), shooter(&[RANGED_FIRST_STRIKE]));
+    assert_eq!(ranged_attack(&mut state, a, t, &both).unwrap().shots.len(), 2);
+}
+
+#[test]
+fn the_second_shot_comes_after_the_answer_and_is_not_answered() {
+    let (mut state, a, t) = battle(200, 200);
+    let report = ranged_attack(&mut state, a, t, &exchange(shooter(&[SHOOTS_TWICE]), shooter(&[]))).unwrap();
+    let order: Vec<_> = report.shots.iter().map(|s| (s.strike.by, s.strike.retaliation)).collect();
+    assert_eq!(
+        order,
+        [(Striker::Attacker, false), (Striker::Defender, true), (Striker::Attacker, false)]
+    );
+    assert_eq!(shots_left(&state, a), 6);
+}
+
+#[test]
+fn ranged_first_strike_counts_the_shots_again_after_the_first() {
+    // Two shots left, shoots twice: the simultaneous path shoots twice, the
+    // first-strike path takes the count again after spending one and shoots once.
+    let (mut base, a, t) = battle(20, 200);
+    for _ in 0..6 {
+        shoot(&mut base, a, t, &ShotContext { penalty: 1, ..Default::default() }).unwrap();
+    }
+    assert_eq!(shots_left(&base, a), 2);
+    let mut plain = base.clone();
+    let report = ranged_attack(&mut plain, a, t, &exchange(shooter(&[SHOOTS_TWICE]), StackRules::default())).unwrap();
+    assert_eq!(report.shots.len(), 2);
+    let mut first = base.clone();
+    let ctx = exchange(shooter(&[SHOOTS_TWICE, RANGED_FIRST_STRIKE]), shooter(&[]));
+    let report = ranged_attack(&mut first, a, t, &ctx).unwrap();
+    let by: Vec<_> = report.shots.iter().map(|s| s.strike.by).collect();
+    assert_eq!(by, [Striker::Attacker, Striker::Defender]);
 }

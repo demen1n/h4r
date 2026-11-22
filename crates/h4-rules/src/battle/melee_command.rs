@@ -13,10 +13,14 @@
 //! - the creature abilities and effects of each stack: the table has no ability
 //!   lists in `CreatureStats`, so the caller passes them in [`StackRules`].
 
+use crate::battle::luck::TargetLuck;
 use crate::battle::melee::{
-    number_of_attacks, plan_melee_attack, AttackCount, Continuation, MeleeSituation, Striker,
+    abilities as melee_abilities, number_of_attacks, plan_melee_attack, plan_ranged_attack, AttackCount,
+    Continuation, MeleeSituation, RangedSituation, ReturnFire, Striker,
 };
-use crate::battle::retaliation::{can_retaliate, effects as retaliation_effects, Footprint, RetaliationCheck};
+use crate::battle::retaliation::{
+    can_retaliate, can_shoot, effects as retaliation_effects, Footprint, RetaliationCheck,
+};
 use crate::battle::state::{BattleState, Losses, UnitId, UnitKind};
 use crate::damage::{attack_hit, Attacker, Defender, HitOptions, School};
 
@@ -180,9 +184,7 @@ pub fn melee_attack(
         target: footprint(state, target)?,
         ..Default::default()
     });
-    let target_can_act = !ctx.target.effects.iter().any(|e| {
-        *e == 0x0b || *e == retaliation_effects::INCAPACITATING_BA || *e == retaliation_effects::INCAPACITATING_9A
-    });
+    let target_can_act = can_act(&ctx.target);
     let plan = plan_melee_attack(&MeleeSituation {
         can_retaliate: can_answer,
         attacker_abilities: &ctx.attacker.abilities,
@@ -250,6 +252,17 @@ pub fn melee_attack(
         }
     }
     Ok(report)
+}
+
+/// "Can act" without the alive part (rva `155ea0`): none of the effects 0x0b, 0xba, 0x9a.
+fn can_act(rules: &StackRules) -> bool {
+    !rules.effects.iter().any(|e| {
+        *e == 0x0b || *e == retaliation_effects::INCAPACITATING_BA || *e == retaliation_effects::INCAPACITATING_9A
+    })
+}
+
+fn alive(state: &BattleState, id: UnitId) -> bool {
+    state.unit(id).is_some_and(|u| u.alive())
 }
 
 /// One strike on its own: roll, add the damage, turn it into losses.
@@ -328,11 +341,12 @@ pub struct ShotReport {
 /// (rva `175ea0`, ranged branch, `decomp/shooting.md`):
 ///
 /// ```text
+/// one shot fewer unless unlimited_shots (rva 168933, in the shot animation's start)
 /// damage = attack_hit(ranged, moved 0, normal luck)
 /// if penalty > 1: damage /= penalty          // truncating
 /// damage = max(damage, 1)
 /// accepted = add_damage(damage, luck roll of the target: yes, permanent: no)
-/// then the losses; then one shot fewer unless unlimited_shots (rva 168933)
+/// then the losses
 /// ```
 ///
 /// Before the damage the shooter turns toward the target: the shot animation
@@ -343,15 +357,21 @@ pub struct ShotReport {
 /// of fire actually hits (`16fe00`), which can be an obstacle in the way; here the
 /// target is always the stack, a blocked line isn't modelled.
 ///
-/// A shooter with extra shots (`number_of_attacks` for a ranged attack) calls
-/// this once per shot. The target's answer (`can_shoot` retaliation) and the
-/// poison of ability 0x31 after the hit are not here.
+/// This is one shot alone, never answered. A whole ranged attack — the number of
+/// shots, the target shooting back — is [`ranged_attack`].
 pub fn shoot(
     state: &mut BattleState,
     attacker: UnitId,
     target: UnitId,
     ctx: &ShotContext,
 ) -> Result<ShotReport, String> {
+    check_shot(state, attacker, target, ctx.penalty)?;
+    let (damage, luck) = fire(state, attacker, target, &ctx.attacker, &ctx.target, ctx.penalty, ctx.target_luck)?;
+    let losses = state.apply_damage(target)?;
+    Ok(ShotReport { strike: StrikeReport { by: Striker::Attacker, retaliation: false, damage, losses }, luck })
+}
+
+fn check_shot(state: &BattleState, attacker: UnitId, target: UnitId, penalty: i32) -> Result<(), String> {
     let (a_unit, t_unit) = (
         state.unit(attacker).ok_or("unknown attacker")?,
         state.unit(target).ok_or("unknown target")?,
@@ -362,27 +382,173 @@ pub fn shoot(
     if !a_unit.alive() || !t_unit.alive() {
         return Err("both stacks must be alive".into());
     }
-    if ctx.penalty <= 0 {
+    if penalty <= 0 {
         return Err("the shot cannot be made".into());
     }
     if creature_shots(state, attacker) <= 0 {
         return Err("the stack has no shots left".into());
     }
-    let from = fighter(state, attacker, &ctx.attacker)?;
-    let to = fighter(state, target, &ctx.target)?;
-    face(state, attacker, target)?;
-    let mut damage = roll_hit(state, &from, &to, HitOptions { ranged: true, ..HitOptions::default() });
-    if ctx.penalty > 1 {
-        damage /= ctx.penalty;
+    Ok(())
+}
+
+/// One shot up to the pending damage: spend the shot, turn, roll, divide by the
+/// penalty, the victim's luck roll, `add_damage`. Losses are not applied here, so two
+/// shots fired together both roll against whole stacks.
+fn fire(
+    state: &mut BattleState,
+    from: UnitId,
+    to: UnitId,
+    from_rules: &StackRules,
+    to_rules: &StackRules,
+    penalty: i32,
+    victim_luck: i32,
+) -> Result<(i32, TargetLuck), String> {
+    if !from_rules.abilities.contains(&UNLIMITED_SHOTS) {
+        state.spend_shot(from)?;
+    }
+    let f = fighter(state, from, from_rules)?;
+    let t = fighter(state, to, to_rules)?;
+    face(state, from, to)?;
+    let mut damage = roll_hit(state, &f, &t, HitOptions { ranged: true, ..HitOptions::default() });
+    // `cmp ecx, 1; jle`: a penalty of 0 or 1 doesn't divide (a shot back needs no aim).
+    if penalty > 1 {
+        damage /= penalty;
     }
     damage = damage.max(1);
-    let (accepted, luck) = state.add_damage_with_luck(target, attacker, damage, false, ctx.target_luck)?;
-    let losses = state.apply_damage(target)?;
-    if !ctx.attacker.abilities.contains(&UNLIMITED_SHOTS) {
-        state.spend_shot(attacker)?;
-    }
-    Ok(ShotReport {
-        strike: StrikeReport { by: Striker::Attacker, retaliation: false, damage: accepted, losses },
+    state.add_damage_with_luck(to, from, damage, false, victim_luck)
+}
+
+/// Inputs of a whole ranged attack that the battle state does not hold.
+#[derive(Debug, Clone, Default)]
+pub struct RangedContext {
+    pub attacker: StackRules,
+    pub target: StackRules,
+    /// The attacker's distance penalty against the target
+    /// ([`crate::battle::shooting::shot_range_penalty`]); 0 means it can't shoot.
+    pub penalty: i32,
+    /// The same penalty for the target shooting back at the attacker. The exe divides
+    /// only by a penalty above 1, so 0 here is a shot back at full damage.
+    pub return_penalty: i32,
+    /// Luck numbers of the two stacks, for the luck roll of whoever is hit (#66).
+    pub attacker_luck: i32,
+    pub target_luck: i32,
+    /// The target's count in the battlefield's threat map (`10d200`; it seems to count
+    /// enemies next to it). Anything but 0 keeps it from shooting back.
+    pub target_threats: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RangedReport {
+    /// Every shot in the order it was fired (a shot back has `retaliation` set).
+    pub shots: Vec<ShotReport>,
+}
+
+/// A whole ranged attack of `attacker` on `target`, as the exe runs it
+/// (`decomp/return_fire.md`; shot start `1693d0`, shot back `168d00`, the delayed
+/// answer `169ca0`, the further shots `169930`):
+///
+/// - the number of shots is [`number_of_attacks`] for a ranged attack;
+/// - the target shoots back once, if [`plan_ranged_attack`] allows it — usually
+///   **together** with the first shot (both roll before any loss), after it with the
+///   attacker's `ranged_first_strike`; shooting back sets the retaliation flag (not
+///   with `unlimited_retaliation`) and costs the target a shot;
+/// - the attacker's other shots follow while both stacks stand; nobody answers them.
+///
+/// Read from the disassembly, not executed against the exe. Not here: the line of
+/// fire hitting something else on the way (the exe shoots back at whatever the line
+/// from the target to the attacker meets first), area shooters (`1faa30`), poison
+/// (#173).
+pub fn ranged_attack(
+    state: &mut BattleState,
+    attacker: UnitId,
+    target: UnitId,
+    ctx: &RangedContext,
+) -> Result<RangedReport, String> {
+    check_shot(state, attacker, target, ctx.penalty)?;
+    let shots_now = |state: &BattleState| {
+        number_of_attacks(&AttackCount {
+            ranged: true,
+            abilities: &ctx.attacker.abilities,
+            effects: &ctx.attacker.effects,
+            shots: creature_shots(state, attacker),
+        })
+    };
+    let attacks = shots_now(state);
+    let retaliated = |state: &BattleState| -> Result<bool, String> {
+        Ok(state.retaliation_flag(target).ok_or("target is not a creature stack")?.retaliated)
+    };
+    let target_can_shoot = |state: &BattleState| {
+        can_shoot(&ctx.target.abilities, &ctx.target.effects, creature_shots(state, target), ctx.target_threats)
+    };
+    let target_can_act = can_act(&ctx.target);
+    let plan = plan_ranged_attack(&RangedSituation {
+        target_retaliated: retaliated(state)?,
+        target_can_shoot: target_can_shoot(state),
+        target_can_act,
+        attacker_abilities: &ctx.attacker.abilities,
+        target_abilities: &ctx.target.abilities,
+    });
+    let keep_flag = !ctx.target.abilities.contains(&melee_abilities::UNLIMITED_RETALIATION);
+    let shot = |by, retaliation, damage, losses, luck| ShotReport {
+        strike: StrikeReport { by, retaliation, damage, losses },
         luck,
-    })
+    };
+
+    let mut report = RangedReport::default();
+    let further = match plan {
+        ReturnFire::Simultaneous => {
+            let (to_target, luck_t) =
+                fire(state, attacker, target, &ctx.attacker, &ctx.target, ctx.penalty, ctx.target_luck)?;
+            state.set_retaliated(target, keep_flag)?;
+            let (to_attacker, luck_a) =
+                fire(state, target, attacker, &ctx.target, &ctx.attacker, ctx.return_penalty, ctx.attacker_luck)?;
+            let on_target = state.apply_damage(target)?;
+            let on_attacker = state.apply_damage(attacker)?;
+            report.shots.push(shot(Striker::Attacker, false, to_target, on_target, luck_t));
+            report.shots.push(shot(Striker::Defender, true, to_attacker, on_attacker, luck_a));
+            attacks - 1
+        }
+        ReturnFire::None | ReturnFire::AfterFirstShot => {
+            let (damage, luck) =
+                fire(state, attacker, target, &ctx.attacker, &ctx.target, ctx.penalty, ctx.target_luck)?;
+            let losses = state.apply_damage(target)?;
+            report.shots.push(shot(Striker::Attacker, false, damage, losses, luck));
+            if plan == ReturnFire::None {
+                attacks - 1
+            } else {
+                // `169ca0`: both stacks still stand and the target can act, then the
+                // shot back checks everything again (`168d00`).
+                if alive(state, attacker) && alive(state, target) && target_can_act
+                    && !retaliated(state)?
+                    && target_can_shoot(state)
+                {
+                    state.set_retaliated(target, keep_flag)?;
+                    let (damage, luck) = fire(
+                        state,
+                        target,
+                        attacker,
+                        &ctx.target,
+                        &ctx.attacker,
+                        ctx.return_penalty,
+                        ctx.attacker_luck,
+                    )?;
+                    let losses = state.apply_damage(attacker)?;
+                    report.shots.push(shot(Striker::Defender, true, damage, losses, luck));
+                }
+                // The count is taken again here, after the first shot was spent: with
+                // fewer shots than attacks this is one less than the other paths give.
+                shots_now(state) - 1
+            }
+        }
+    };
+    // `169930`: one more shot while the attacker stands; it stops when the target fell.
+    for _ in 0..further.max(0) {
+        if !alive(state, attacker) || !alive(state, target) {
+            break;
+        }
+        let (damage, luck) = fire(state, attacker, target, &ctx.attacker, &ctx.target, ctx.penalty, ctx.target_luck)?;
+        let losses = state.apply_damage(target)?;
+        report.shots.push(shot(Striker::Attacker, false, damage, losses, luck));
+    }
+    Ok(report)
 }
