@@ -219,3 +219,21 @@ fn a_shot_rolls_the_targets_luck_and_is_not_answered() {
     assert_eq!(state.unit(a).unwrap().total_hits(), Some(200));
     assert!(!state.retaliation_flag(t).unwrap().retaliated);
 }
+
+#[test]
+fn a_shooter_turns_toward_its_target_before_the_damage() {
+    use h4_rules::battle::state::CombatEvent;
+    let (mut state, a, t) = battle(20, 200);
+    // The attacker starts facing 0; the target stands one row further, direction 4.
+    assert_eq!(state.unit(a).unwrap().facing, 0);
+    assert_eq!(state.facing_toward(a, t), Ok(4));
+    let target_facing = state.unit(t).unwrap().facing;
+    shoot(&mut state, a, t, &ShotContext { penalty: 1, ..Default::default() }).unwrap();
+    assert_eq!(state.unit(a).unwrap().facing, 4);
+    assert_eq!(state.unit(t).unwrap().facing, target_facing, "the target doesn't turn");
+    // The turn comes before the first roll of the hit.
+    let events = state.events();
+    let turned = events.iter().position(|e| matches!(e, CombatEvent::Turned { unit, facing: 4 } if *unit == a));
+    let rolled = events.iter().position(|e| matches!(e, CombatEvent::Rolled { .. }));
+    assert!(turned.unwrap() < rolled.unwrap());
+}

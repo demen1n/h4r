@@ -330,6 +330,14 @@ pub struct ShotReport {
 /// then the losses; then one shot fewer unless unlimited_shots (rva 168933)
 /// ```
 ///
+/// Before the damage the shooter turns toward the target: the shot animation
+/// (`168ae0` → `168720`, action `ranged`) takes the direction `11ede0` from the
+/// shooter's footprint center to the center of what the shot hits, both in 1/16 of a
+/// cell — the same direction as [`BattleState::facing_toward`] (the centers differ
+/// from `1684a0`'s only by a power-of-two scale). The exe aims at the object the line
+/// of fire actually hits (`16fe00`), which can be an obstacle in the way; here the
+/// target is always the stack, a blocked line isn't modelled.
+///
 /// A shooter with extra shots (`number_of_attacks` for a ranged attack) calls
 /// this once per shot. The target's answer (`can_shoot` retaliation) and the
 /// poison of ability 0x31 after the hit are not here.
@@ -357,6 +365,7 @@ pub fn shoot(
     }
     let from = fighter(state, attacker, &ctx.attacker)?;
     let to = fighter(state, target, &ctx.target)?;
+    face(state, attacker, target)?;
     let mut damage = roll_hit(state, &from, &to, HitOptions { ranged: true, ..HitOptions::default() });
     if ctx.penalty > 1 {
         damage /= ctx.penalty;
