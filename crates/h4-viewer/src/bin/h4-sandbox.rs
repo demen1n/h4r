@@ -15,7 +15,7 @@
 //!
 //! What is the game's: deployment, initiative and turn order, movement points, the path
 //! search and the stop, zones of control, the attack position and approach, damage,
-//! retaliation, shots, facing. What is not: no backdrop, terrain or obstacles (a plain
+//! retaliation, shots and shooting back, facing. What is not: no backdrop, terrain or obstacles (a plain
 //! field), no creature abilities (the per-creature ability lists aren't read yet: every
 //! stack walks, shooters are the stacks with shots), no shot penalties (range and
 //! obstacles are ported but not fed here), morale 0, no heroes, no spells, no AI.
@@ -29,7 +29,8 @@ use h4_formats::sprite::{ActorSequence, Rect};
 use h4_formats::table::Table;
 use h4_rules::battle::deployment::Formation;
 use h4_rules::battle::initiative::InitiativeStats;
-use h4_rules::battle::melee_command::{shoot, MeleeContext, ShotContext};
+use h4_rules::battle::melee_command::{ranged_attack, MeleeContext, RangedContext, StackRules};
+use h4_rules::battle::retaliation::abilities::RANGED;
 use h4_rules::battle::move_command::{approach_and_attack, attack_positions_against, move_unit, AttackOrder, MoveRules};
 use h4_rules::battle::move_points::MoveModifiers;
 use h4_rules::battle::state::{BattleState, CombatEvent, UnitId, UnitKind};
@@ -230,8 +231,28 @@ fn click(battle: &mut BattleState, active: UnitId, cell: (i32, i32)) -> Result<S
     let target = under.filter(|&t| battle.unit(t).is_some_and(|u| u.side != side));
     let text = if let Some(target) = target {
         if shots(battle, active) > 0 {
-            let report = shoot(battle, active, target, &ShotContext { penalty: 1, ..Default::default() })?;
-            format!("shot: {} damage, {} killed", report.strike.damage, report.strike.losses.killed)
+            // Abilities aren't read yet: a stack with shots is a shooter, so it can
+            // shoot back. No range penalties and no threat map here.
+            let rules = |id| StackRules {
+                abilities: if shots(battle, id) > 0 { vec![RANGED] } else { Vec::new() },
+                ..Default::default()
+            };
+            let ctx = RangedContext {
+                attacker: rules(active),
+                target: rules(target),
+                penalty: 1,
+                return_penalty: 1,
+                ..Default::default()
+            };
+            ranged_attack(battle, active, target, &ctx)?
+                .shots
+                .iter()
+                .map(|s| {
+                    let s = &s.strike;
+                    format!("{:?} shot{} {} dmg, {} killed", s.by, if s.retaliation { " (answer)" } else { "" }, s.damage, s.losses.killed)
+                })
+                .collect::<Vec<_>>()
+                .join("; ")
         } else {
             let zone = zones()?;
             let positions = attack_positions_against(battle, active, target, &rules, &zone)?;
