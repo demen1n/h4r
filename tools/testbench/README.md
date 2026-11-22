@@ -416,3 +416,15 @@ and insert, the builder `48b090` with `11ed40`/`11edb0`/`11ed80`, and the cell l
 zone-of-control directions for movers at corners near enemies. Boundaries: the creature's
 combat footprint (`f0f0`, built by the real `1fc340` after every arena reset), atexit for
 the cache's static, and the creatures' virtual accessors.
+
+```sh
+.venv/bin/python tools/testbench/facing.py --exe bin/heroes4.exe \
+  --out crates/h4-rules/tests/facing_vectors.tsv
+```
+
+`facing.py`: the turning arithmetic of combat units (`decomp/facing.md`). 2000 cases of
+`1684a0` (a striker turning toward its victim: both footprint centers in 1/65536 of a cell,
+then `11ede0`) on random corners and sizes 1–8, a quarter of them near neighbours; 2000
+cases of `11ee50` followed by `11edb0` (the flight's straight line) on random points in
+1/16 of a cell, a fifth of them exact diagonals and straight lines. Boundary: the footprint
+size (virtual `+8`).

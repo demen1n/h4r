@@ -35,9 +35,10 @@
 //! attack, which a plain move doesn't do).
 
 use crate::battle::attack_angles::{attack_positions, AngleAttacker, AngleTarget, AttackPosition};
+use crate::battle::facing;
 use crate::battle::melee_command::{melee_attack, MeleeContext, MeleeReport};
 use crate::battle::path::{flags, Mover, PathSearch};
-use crate::battle::path_prepare::{direction, prepare, FieldObject, FieldObjectKind, GateState, PrepareInput, PreparedMover};
+use crate::battle::path_prepare::{prepare, FieldObject, FieldObjectKind, GateState, PrepareInput, PreparedMover};
 use crate::battle::path_template::{template, BlockageMap, Blocker, BlockerKind};
 use crate::battle::state::{BattleState, BattleUnit, UnitId};
 use crate::battlefield::{BattlefieldGrid, FLAG_BLOCKED};
@@ -341,7 +342,10 @@ fn walk(state: &mut BattleState, id: UnitId, search: &PathSearch, target: (i32, 
 /// way it went: a walker the direction of its last step (the walk animation turns it
 /// at every step to the direction in the path point, `3def70`); a flier or a teleporter
 /// straight from where it stood to where it lands (`t_play_combat_flight` `3dd6f0` with
-/// `11ee50`, the teleport `47e2a0` with `11ede0`).
+/// `11ee50`, the teleport `47e2a0` with `11ede0`; [`facing::straight`]). Both points are
+/// footprint corners in 1/16 of a cell: the creature's position `+0xc` and the landing
+/// point `16bad0` builds as cell · 16. A landing in a castle tower (`1f6610`) would
+/// shift the point; towers aren't moved into here.
 fn walk_to(state: &mut BattleState, id: UnitId, search: &PathSearch, to: (i32, i32), rules: &MoveRules) -> Result<MoveReport, String> {
     let from = state
         .unit(id)
@@ -352,11 +356,11 @@ fn walk_to(state: &mut BattleState, id: UnitId, search: &PathSearch, to: (i32, i
     let mut path = search.path_to(to).ok_or("the target cannot be reached")?;
     path.reverse();
     let facing = if rules.flies || rules.teleports {
-        direction((from.0 * 16, from.1 * 16), (to.0 * 16, to.1 * 16))
+        facing::straight((from.0 * 16, from.1 * 16), (to.0 * 16, to.1 * 16))
     } else {
-        search.map.cell(to).expect("checked above").direction()
+        search.map.cell(to).expect("checked above").direction() as u8
     };
-    state.relocate(id, to, cost, facing as u8)?;
+    state.relocate(id, to, cost, facing)?;
     Ok(MoveReport { unit: id, from, to, path, cost })
 }
 
