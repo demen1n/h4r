@@ -41,16 +41,20 @@ return modify_damage(sum, target, ranged, moved, luck)
 
 ## modify_damage — FUN_005edf30 (rva 1edf30)
 
-Аргументы: base, target, ranged, moved (в melee по умолчанию слот `+0x18`), luck (0/1/2).
+Аргументы: base, target, ranged, moved (в melee по умолчанию слот `+0x18`), стена (0/1/2).
 По дизассемблеру, по порядку:
 
 1. **charging** (0x0b), только melee, moved > 500: `dmg = (moved*10/350 + 85) * dmg / 100`.
 2. Если у цели слот `+0x40` истинен («великан»?): атакующий с 0x1c, или (ranged ? 0x35 : 0x2b)
    → `dmg *= 2`; иначе эффект заклинания 0x8c у атакующего → `dmg += dmg >> 1`.
    0x1c — `giantslayer`, 0x2b — `melee_giantslayer`, 0x35 — `ranged_giantslayer`.
-3. **Удача**: множитель `m = {1.0, 1.25, 1.5, 2.0}[obj->[+0x60]]`, `obj = [this+0xa18]`
-   (таблица double по VA 0x97cb68, rva 17b8f0). luck 1: `dmg = trunc(m * dmg)`,
-   luck 2: `dmg = trunc(dmg / m)`.
+3. **Стена замка между бойцами** (раньше здесь ошибочно стояла «удача»): множитель
+   `m = {1.0, 1.25, 1.5, 2.0}[obj->[+0x60]]`, `obj = [this+0xa18]` — поле боя (таблица
+   double по VA 0x97cb68, rva 17b8f0; `+0x60` — видимо, уровень замка, #74). Аргумент — ответ
+   `1701f0` (центр бьющего → центр цели, `battle::wall_line`, `decomp/melee_attack.md`):
+   1 (стена, линия к большим x) — `dmg = trunc(m * dmg)`, 2 (к меньшим x) — `dmg = trunc(dmg / m)`.
+   В коде — `damage::AcrossWall`, `WALL_MULTIPLIERS`. Удача — только у цели при приёме урона
+   (`battle::luck`, `decomp/apply_damage.md`).
 4. `ratio = коэффициент атаки к защите (250a60)`, `dmg = trunc(ratio * dmg)`.
 5. Оберег по школе атакующего (слот `+4`: 0 life — способность 0x22 или эффект 0x77;
    1 order — 0x79; 2 death — эффект 0x76 или способность 0x10; 3 chaos — 0x75 или 0x0a;
@@ -83,9 +87,9 @@ cdecl: (attacker, number, target, already_dealt, dmg).
 
 ## Что не хватает для полной картины
 
-- Где решается удача атакующего (аргумент luck) и как настоящий удар собирает бросок,
-  модификаторы и `finalize_damage` (`attack.cpp`).
-- Игровые названия слота `+0x40` цели и эффекта 0x8c; поле `[+0x60]` для силы удачи.
+- Как настоящий удар собирает бросок, модификаторы и `finalize_damage` (`attack.cpp`).
+- Игровые названия слота `+0x40` цели и эффекта 0x8c; кто ставит поле боя `[+0x60]` (сила
+  стены, #74).
 - Структура `t_abstract_creature` (`+0x198`/`+0x408`/`+0x354` — что-то про полученный урон).
 - Сверка с известными формулами сообщества (Equilibris `equilibris.chm`, `Skill_Guide.pdf`).
 

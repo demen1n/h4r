@@ -159,7 +159,7 @@ class Original:
 
     def modify(self, v, setup_only=False):
         (base, offense, reduction, defense, bonus, school, abilities, resistances,
-         wards, giant, effect, ranged, moved, luck, strength) = v
+         wards, giant, effect, ranged, moved, wall, strength) = v
         abilities = [] if abilities == '-' else list(map(int, abilities.split(',')))
         resistances = [] if resistances == '-' else list(map(int, resistances.split(',')))
         self.word(CREATURE + 0x98, HEAP + 0x1400)
@@ -187,7 +187,7 @@ class Original:
         self.word(HEAP + 0x1c00 + 8, self.accessor(13, float(defense), floating=True))
         if setup_only:
             return
-        return self.call(0x1edf30, (int(base) & 0xffffffff, TARGET, int(ranged), int(moved) & 0xffffffff, int(luck)), this=CREATURE)
+        return self.call(0x1edf30, (int(base) & 0xffffffff, TARGET, int(ranged), int(moved) & 0xffffffff, int(wall)), this=CREATURE)
 
     def immunity_setup(self, v):
         flags, caster, target, effects, hostile, same, resistance = v
@@ -509,19 +509,19 @@ def corpus():
 
 def modifier_corpus():
     # Protocol: base offense reduction defense bonus school attacker-abilities
-    # defender-abilities ward-mask giant giant-effect ranged moved luck strength.
+    # defender-abilities ward-mask giant giant-effect ranged moved wall strength.
     def case(**changes):
         fields = dict(base=101, offense=11, reduction=1, defense=11, bonus=1,
                       school=5, abilities='-', resistances='-', wards=0, giant=0,
-                      effect=0, ranged=0, moved=0, luck=0, strength=3)
+                      effect=0, ranged=0, moved=0, wall=0, strength=3)
         fields.update(changes)
         return 'modify ' + ' '.join(map(str, fields.values()))
     for base, moved, ranged in itertools.product([0, 1, 15, 101, 10001], [0, 499, 500, 501, 524, 525, 700, 1400], [0, 1]):
         yield case(base=base, abilities='11', moved=moved, ranged=ranged)
     for giant, effect, abilities, ranged in itertools.product([0, 1], [0, 1], ['-', '28', '43', '53', '28,43,53'], [0, 1]):
         yield case(giant=giant, effect=effect, abilities=abilities, ranged=ranged)
-    for base, luck, strength in itertools.product([0, 1, 3, 15, 101, 99999], [0, 1, 2], range(4)):
-        yield case(base=base, luck=luck, strength=strength)
+    for base, wall, strength in itertools.product([0, 1, 3, 15, 101, 99999], [0, 1, 2], range(4)):
+        yield case(base=base, wall=wall, strength=strength)
     for school, wards, resistances in itertools.product(range(6), [0, 1, 2, 4, 8, 16, 31, 63], ['-', '34', '16', '10', '34,16,10']):
         yield case(school=school, wards=wards, resistances=resistances)
     for abilities, resistances, ranged in itertools.product(['-', '20', '9', '84', '83', '12', '20,12', '9,83,84,12'], ['-', '21', '13', '21,13'], [0, 1]):
@@ -531,7 +531,7 @@ def modifier_corpus():
         yield case(base=base, offense=offense, reduction=reduction, defense=defense, bonus=bonus)
         yield case(base=base, offense=offense, reduction=reduction, defense=defense, bonus=bonus,
                    abilities='11,28,20,12', resistances='21,13', school=3, wards=8,
-                   giant=1, effect=1, moved=700, luck=1, strength=1)
+                   giant=1, effect=1, moved=700, wall=1, strength=1)
 
     # Exact-integer boundaries expose rounding of the coefficient before scaling.
     for offense, defense in itertools.product(range(1, 26), repeat=2):
@@ -547,14 +547,14 @@ def modifier_corpus():
                    abilities=','.join(map(str, aa)) or '-', resistances=','.join(map(str, da)) or '-',
                    school=rng.randrange(6), wards=rng.randrange(64), giant=rng.randrange(2),
                    effect=rng.randrange(2), ranged=rng.randrange(2), moved=rng.choice([500, 501, 525, 700, 1400]),
-                   luck=rng.randrange(3), strength=rng.randrange(4))
+                   wall=rng.randrange(3), strength=rng.randrange(4))
 
 
 def attack_corpus():
     def modifier(ability='66', **changes):
         f = dict(base=15, offense=11, reduction=1, defense=11, bonus=1, school=5,
                  abilities=ability, resistances='-', wards=0, giant=0, effect=0,
-                 ranged=0, moved=0, luck=0, strength=3)
+                 ranged=0, moved=0, wall=0, strength=3)
         f.update(changes)
         return ' '.join(map(str, f.values()))
     def final(**changes):
@@ -568,9 +568,9 @@ def attack_corpus():
     for ability, creature, eligible, excluded, hp, dealt in itertools.product(
             ['-', '66'], [0, 1], [0, 1], range(8), [0, 30], [0, 10, 100]):
         yield 'ability42 ' + modifier(ability) + ' ' + final(creature=creature, eligible=eligible, excluded=excluded, hp=hp, dealt=dealt)
-    for seed, number, ranged, luck, block in itertools.product([1, 32767], [0, 1, 9, 10, 11, 1000], [0, 1], [0, 1, 2], [0, 1]):
+    for seed, number, ranged, wall, block in itertools.product([1, 32767], [0, 1, 9, 10, 11, 1000], [0, 1], [0, 1, 2], [0, 1]):
         m = modifier('11,28,20,12,66', offense=5, defense=6, school=3, wards=8,
-                     resistances='21,13', giant=1, effect=1, moved=700, ranged=ranged, luck=luck, strength=1)
+                     resistances='21,13', giant=1, effect=1, moved=700, ranged=ranged, wall=wall, strength=1)
         yield f'attack {seed} 20 1 3 3 ' + m + ' ' + final(number=number, block=block, hp=300, dealt=10)
     for creature, eligible, excluded, ability in itertools.product([0, 1], [0, 1], [0, 1, 2, 4], ['-', '66']):
         yield 'attack 7 20 7 19 3 ' + modifier(ability) + ' ' + final(creature=creature, eligible=eligible, excluded=excluded)

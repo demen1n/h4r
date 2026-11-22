@@ -6,19 +6,20 @@ use h4_rules::damage::*;
 
 /// Reads the 15 modifier fields, in this order:
 /// `base offense reduction defense bonus school attacker-abilities defender-abilities
-/// ward-mask giant giant-effect ranged moved luck luck-strength`.
+/// ward-mask giant giant-effect ranged moved wall wall-strength`.
 ///
 /// - ability lists are comma-separated decimal ids, `-` for none;
 /// - `school` is an index into the game's order (life, order, death, chaos, nature, might);
 /// - `ward-mask` bit i = warded against school i (by a spell);
-/// - `luck`: 0 normal, 1 good, 2 bad; `luck-strength` is an index into `LUCK_MULTIPLIERS`.
+/// - `wall`: 0 none, 1 crossed toward greater x, 2 toward smaller x (the exe's fourth
+///   argument); `wall-strength` is an index into `WALL_MULTIPLIERS`.
 ///
 /// Fields the request doesn't set (ids, stack size, HP) get neutral values; the target's
 /// HP is huge so the final HP limit never interferes with a modifier test.
 pub fn parse(
     v: &[&str],
 ) -> Result<(i32, Attacker, Defender, HitOptions), Box<dyn std::error::Error>> {
-    let [base, offense, reduction, defense, bonus, school, abilities, resistances, wards, giant, effect, ranged, moved, luck, strength] =
+    let [base, offense, reduction, defense, bonus, school, abilities, resistances, wards, giant, effect, ranged, moved, wall, strength] =
         v
     else {
         return Err("invalid modifier fixture".into());
@@ -65,15 +66,15 @@ pub fn parse(
             .filter_map(|(i, s)| ((mask >> i) & 1 == 1).then_some(*s))
             .collect(),
     };
-    let luck = match *luck {
-        "0" => Luck::Normal,
-        "1" => Luck::Good,
-        "2" => Luck::Bad,
-        _ => return Err("invalid luck".into()),
+    let across_wall = match *wall {
+        "0" => AcrossWall::No,
+        "1" => AcrossWall::TowardGreaterX,
+        "2" => AcrossWall::TowardSmallerX,
+        _ => return Err("invalid wall".into()),
     };
-    let multiplier = *LUCK_MULTIPLIERS
+    let multiplier = *WALL_MULTIPLIERS
         .get(strength.parse::<usize>()?)
-        .ok_or("invalid luck strength")?;
+        .ok_or("invalid wall strength")?;
     Ok((
         base.parse()?,
         a,
@@ -81,8 +82,8 @@ pub fn parse(
         HitOptions {
             ranged: *ranged == "1",
             moved: moved.parse()?,
-            luck,
-            luck_multiplier: multiplier,
+            across_wall,
+            wall_multiplier: multiplier,
             ..HitOptions::default()
         },
     ))
@@ -97,8 +98,8 @@ pub fn evaluate(v: &[&str]) -> Result<i32, Box<dyn std::error::Error>> {
         &d,
         options.ranged,
         options.moved,
-        options.luck,
-        options.luck_multiplier,
+        options.across_wall,
+        options.wall_multiplier,
         &mut Vec::new(),
     ))
 }
