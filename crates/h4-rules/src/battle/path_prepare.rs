@@ -118,7 +118,8 @@ pub struct PrepareInput<'a> {
     /// The path finder's second flag (`+0x51`): only hostile creatures that can be
     /// fought block; gates stay open.
     pub attack_mode: bool,
-    /// Terrain bits of a cell after the terrain refresh (the combat terrain map).
+    /// Terrain bits of a cell after the terrain refresh (the combat terrain map,
+    /// [`crate::battle::terrain_costs::footprint_terrain_bits`]).
     pub terrain: &'a dyn Fn((i32, i32)) -> u32,
     /// The mover's terrain cost list (`225320`): (terrain bits, entry cost). Read only
     /// when the mover walks.

@@ -19,10 +19,10 @@
 //! disassembly.
 //!
 //! What the state doesn't know yet stays the caller's input, in [`MoveRules`]:
-//! - the movement points (virtual `+0x18` of the creature's stats; how the exe gets them
-//!   from the table's `Move` isn't found yet);
+//! - the movement points ([`BattleState::movement_points`], `1ef750`);
 //! - flying, teleport, `long_weapon` and effect 9 (the abilities and effects of a stack);
-//! - the combat terrain map and the creature's terrain costs (#182);
+//! - the combat terrain bits ([`BattleState::terrain_bits`], `224f60`) and the creature's
+//!   terrain costs ([`crate::battle::terrain_costs::terrain_costs`], `225320`);
 //! - the zone-of-control directions (`172210`), a closure for [`move_unit`]:
 //!   [`crate::battle::zone_of_control::zones_for`] builds it, with facings from the caller.
 //!
@@ -57,9 +57,11 @@ pub struct MoveRules<'a> {
     pub long_weapon: bool,
     /// Effect 9: the unit can't move.
     pub held: bool,
-    /// Terrain bits of a cell after the terrain refresh (#182).
+    /// Terrain bits of a corner after the terrain refresh: [`BattleState::terrain_bits`]
+    /// with the mover (read them into a map before the move: it borrows the state).
     pub terrain: &'a dyn Fn((i32, i32)) -> u32,
-    /// The unit's terrain cost list: (terrain bits, entry cost) (#182).
+    /// The unit's terrain cost list: (terrain bits, entry cost), from
+    /// [`crate::battle::terrain_costs::terrain_costs`] through `as_entry_costs`.
     pub costs: &'a [(u32, u16)],
 }
 

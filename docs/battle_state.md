@@ -122,8 +122,10 @@ let report = move_unit(&mut battle, active, (50, 45), &rules, |_| [false; 8])?;
 Очки движения считает `battle.movement_points(id, &MoveModifiers)` (`1ef750`,
 `decomp/move_points.md`: база из статов, бонусы армии и артефактов, море, ускорение и
 замедление — в `MoveModifiers` от вызывающего); их, полёт, телепорт, `long_weapon` и эффект 9
-передаёт вызывающий в `MoveRules` (полёт и прочее зависят от способностей), как и землю боя
-(#182) и зоны контроля — замыкание `zone_of_control::zones_for(&battle, id, traits)`: угрозы
+передаёт вызывающий в `MoveRules` (полёт и прочее зависят от способностей), как и землю боя:
+биты — `battle.terrain_bits(угол, размер, Some(id))` (`224f60`), цены —
+`terrain_costs::terrain_costs` (`225320`, `decomp/terrain_costs.md`; навык героя и родная
+земля — входы), и зоны контроля — замыкание `zone_of_control::zones_for(&battle, id, traits)`: угрозы
 всех участников по правилам exe, направление взгляда — из состояния, способности даёт вызывающий.
 
 Направление взгляда (`BattleUnit::facing`, 0..7 по таблице направлений): атакующие

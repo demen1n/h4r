@@ -32,6 +32,7 @@ pub mod path_template;
 pub mod retaliation;
 pub mod shooting;
 pub mod state;
+pub mod terrain_costs;
 pub mod wounds;
 pub mod zone_of_control;
 pub use state::BattleState;
