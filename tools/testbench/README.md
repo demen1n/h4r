@@ -39,7 +39,8 @@ The deterministic corpus has 11,249 requests:
   next RNG number to verify consumption.
 
 - 1,321 full modifier cases (RVA `1edf30`): charging at movement thresholds,
-  melee/ranged giant slaying, effect `0x8c`, every luck multiplier and mode,
+  melee/ranged giant slaying, effect `0x8c`, every castle-wall multiplier and mode
+  (the fourth argument, first misread as luck),
   all schools and ward sources, fire/cold/area attacks, defense reduction,
   clamps and zero damage, 625 integer-boundary cases and 128 deterministic
   mixed-effect cases.
@@ -96,8 +97,8 @@ All 64 original combat/dice vectors are stored in
 `crates/h4-rules/tests/exe_vectors.tsv`; two ordinary Rust tests verify them without
 Unicorn or game data, including reseeding and RNG consumption.
 
-The modifier fixture executes `1edf30`, its nested `250a60` coefficient, luck
-lookup (`17b8f0`) and the CRT float-to-integer conversion (`4ed234`) from the exe.
+The modifier fixture executes `1edf30`, its nested `250a60` coefficient, wall
+multiplier lookup (`17b8f0`) and the CRT float-to-integer conversion (`4ed234`) from the exe.
 Only virtual input accessors (stats, abilities, effects) are fixture stubs. In this
 mode the dice fixture's modifier interception is disabled.
 The coefficient must stay at 53-bit precision until scaled damage is truncated;
@@ -131,7 +132,7 @@ do not run the full battlefield attack dispatcher or apply deaths/retaliation.
 Target HP and already-dealt inputs stay fixed over each three-hit sequence so
 that RNG progression and the numerical chain can be compared independently.
 Scope still to add: spell-targeting/immunity rules, real creature/battlefield
-objects, ranged penalties, luck selection, and full attack side effects.
+objects, ranged penalties, and full attack side effects.
 This is a function-level bench, not a replay or proof that full battles match.
 The ordinary cross-platform CI does not require Unicorn or an original exe.
 
@@ -455,3 +456,14 @@ terrain bit queries under a footprint (`224f60` whole on a 102×102 field with r
 terrain bytes and flags, the footprint from the real `1fc340`). Boundaries: `484a10` (the
 terrain index mapping for types 9–18, never read for 1–8) answers 0, the creature's
 virtual accessors and `t_battlefield_cell::get_creature`.
+
+```sh
+.venv/bin/python tools/testbench/wall_line.py --exe bin/heroes4.exe \
+  --out crates/h4-rules/tests/wall_line_vectors.tsv
+```
+
+`wall_line.py`: the castle wall check of a melee strike (`1701f0`, the fourth argument of
+the damage roll) executed whole on 300 random 102×102 fields with castle wall lines,
+gates and other obstacles, 2976 lines between random points (1/16 of a cell), with the
+obstacle type read by the real `477790`. Boundaries: `t_battlefield_cell::get_obstacle`,
+`t_castle_gate::is_open` and whether the field has a gate object.

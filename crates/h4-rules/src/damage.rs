@@ -6,7 +6,7 @@
 //! 1. **Base damage** — the dice: every creature in the stack rolls between its low and
 //!    high damage ([`roll_base_damage`]); the AI and the damage preview use the average
 //!    instead ([`average_base_damage`]).
-//! 2. **Modifiers** ([`modify_damage`]) — charge, giant slaying, luck, attack against
+//! 2. **Modifiers** ([`modify_damage`]) — charge, giant slaying, a castle wall between, attack against
 //!    defense, wards, fire and cold resistance.
 //! 3. **Final limits** ([`finalize_damage`]) — no more than the target has hit points
 //!    left, then the target's `block` ability.
@@ -78,18 +78,24 @@ pub enum School {
     Might,
 }
 
-/// Outcome of the luck check for this hit.
+/// Whether a castle wall (or a closed gate) stands between the striker and its victim,
+/// and which way the line from the striker crosses it: the fourth argument of the damage
+/// roll (`1ee240` → `1edf30`), the answer of `1701f0` for a melee strike
+/// ([`crate::battle::wall_line`]). It was first read as the attacker's luck; it isn't
+/// (the target's luck is a separate roll, `battle::luck`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Luck {
-    Normal,
-    Good,
-    Bad,
+pub enum AcrossWall {
+    /// 0: no wall in between.
+    No,
+    /// 1: the line goes through a wall toward greater rows (x): damage × the multiplier.
+    TowardGreaterX,
+    /// 2: through a wall toward smaller rows: damage ÷ the multiplier.
+    TowardSmallerX,
 }
 
-/// How strong luck is: good luck multiplies damage, bad luck divides it, by one of these.
-/// The game picks the entry by a field of the battle (`[+0x60]` of the object at
-/// `t_combat_creature + 0xa18`) whose meaning we don't know yet.
-pub const LUCK_MULTIPLIERS: [f64; 4] = [1.0, 1.25, 1.5, 2.0];
+/// How much a wall changes the damage: the battlefield's field `+0x60` picks one of these
+/// (`17b8f0`, doubles at VA `0x97cb68`). Probably the castle's level; not traced yet (#74).
+pub const WALL_MULTIPLIERS: [f64; 4] = [1.0, 1.25, 1.5, 2.0];
 
 /// What the damage code needs to know about the attacking stack.
 #[derive(Debug, Clone)]
@@ -147,7 +153,7 @@ pub enum DamageEvent {
     Rolled { damage: i32 },
     Charge { damage: i32 },
     GiantSlaying { damage: i32 },
-    Luck { luck: Luck, damage: i32 },
+    Wall { across: AcrossWall, damage: i32 },
     AttackVsDefense { ratio: f32, damage: i32 },
     Ward { damage: i32 },
     FireResisted { damage: i32 },
@@ -196,8 +202,8 @@ pub fn modify_damage(
     defender: &Defender,
     ranged: bool,
     moved: i32,
-    luck: Luck,
-    luck_multiplier: f64,
+    across_wall: AcrossWall,
+    wall_multiplier: f64,
     log: &mut Vec<DamageEvent>,
 ) -> i32 {
     let mut damage = base;
@@ -225,14 +231,15 @@ pub fn modify_damage(
         }
     }
 
-    // Luck multiplies or divides; the game computes in floating point and truncates.
-    match luck {
-        Luck::Normal => {}
-        Luck::Good => damage = (luck_multiplier * damage as f64) as i32,
-        Luck::Bad => damage = (damage as f64 / luck_multiplier) as i32,
+    // A wall in between multiplies or divides; the game computes in floating point and
+    // truncates.
+    match across_wall {
+        AcrossWall::No => {}
+        AcrossWall::TowardGreaterX => damage = (wall_multiplier * damage as f64) as i32,
+        AcrossWall::TowardSmallerX => damage = (damage as f64 / wall_multiplier) as i32,
     }
-    if luck != Luck::Normal {
-        log.push(DamageEvent::Luck { luck, damage });
+    if across_wall != AcrossWall::No {
+        log.push(DamageEvent::Wall { across: across_wall, damage });
     }
 
     // Attack against defense: the heart of the formula.
@@ -375,7 +382,7 @@ pub fn finalize_attack_damage(
 
 /// Everything about one hit that isn't a property of the two creatures. Grouped in a struct
 /// so a caller names what it sets and leaves the rest at [`HitOptions::default`]
-/// (melee, no move, normal luck, no damage dealt yet, ability 0x42 unknown).
+/// (melee, no move, no wall in between, no damage dealt yet, ability 0x42 unknown).
 #[derive(Debug, Clone)]
 pub struct HitOptions {
     /// A shot rather than a melee strike.
@@ -383,10 +390,10 @@ pub struct HitOptions {
     /// How far the attacker moved before striking, for `charging` (battlefield distance
     /// units, see [`modify_damage`]).
     pub moved: i32,
-    /// Which luck came up; rolling for it is the caller's job.
-    pub luck: Luck,
-    /// How strong the luck is, one of [`LUCK_MULTIPLIERS`]; unused for normal luck.
-    pub luck_multiplier: f64,
+    /// A castle wall between the striker and the victim ([`crate::battle::wall_line`]).
+    pub across_wall: AcrossWall,
+    /// How strong the wall is, one of [`WALL_MULTIPLIERS`]; unused without a wall.
+    pub wall_multiplier: f64,
     /// Damage the target has already taken in this attack (see [`finalize_damage`]).
     pub already_dealt: i32,
     /// Answers for ability 0x42, or `None` if the caller can't give them (no bonus then).
@@ -398,8 +405,8 @@ impl Default for HitOptions {
         Self {
             ranged: false,
             moved: 0,
-            luck: Luck::Normal,
-            luck_multiplier: LUCK_MULTIPLIERS[0],
+            across_wall: AcrossWall::No,
+            wall_multiplier: WALL_MULTIPLIERS[0],
             already_dealt: 0,
             ability_42: None,
         }
@@ -413,7 +420,7 @@ impl Default for HitOptions {
 /// `dice` is any [`CombatDice`]: in a real battle pass the `BattleState`, which logs every
 /// roll; a bare `CombatRandom` is for exe vectors and tests.
 ///
-/// Not here (the caller's job): range and obstacle penalties, rolling for luck.
+/// Not here (the caller's job): range and obstacle penalties, the target's luck.
 pub fn attack_hit(
     attacker: &Attacker,
     defender: &Defender,
@@ -429,8 +436,8 @@ pub fn attack_hit(
         defender,
         options.ranged,
         options.moved,
-        options.luck,
-        options.luck_multiplier,
+        options.across_wall,
+        options.wall_multiplier,
         log,
     );
     finalize_attack_damage(
@@ -469,12 +476,12 @@ pub fn melee_hit(
     attacker: &Attacker,
     defender: &Defender,
     moved: i32,
-    luck: Luck,
-    luck_multiplier: f64,
+    across_wall: AcrossWall,
+    wall_multiplier: f64,
     dice: &mut impl CombatDice,
     log: &mut Vec<DamageEvent>,
 ) -> i32 {
-    attack_hit(attacker, defender, &HitOptions { moved, luck, luck_multiplier,
+    attack_hit(attacker, defender, &HitOptions { moved, across_wall, wall_multiplier,
         ..HitOptions::default() }, dice, log)
 }
 
@@ -512,7 +519,7 @@ mod tests {
     }
 
     fn modify(base: i32, a: &Attacker, d: &Defender) -> i32 {
-        modify_damage(base, a, d, false, 0, Luck::Normal, 2.0, &mut Vec::new())
+        modify_damage(base, a, d, false, 0, AcrossWall::No, 2.0, &mut Vec::new())
     }
 
     #[test]
@@ -594,26 +601,26 @@ mod tests {
         // area effect counts as fire only when shooting
         a.abilities = vec![ability::LARGE_AREA_EFFECT];
         assert_eq!(modify(100, &a, &d), 100);
-        let ranged = modify_damage(100, &a, &d, true, 0, Luck::Normal, 2.0, &mut Vec::new());
+        let ranged = modify_damage(100, &a, &d, true, 0, AcrossWall::No, 2.0, &mut Vec::new());
         assert_eq!(ranged, 50);
     }
 
     #[test]
-    fn luck_charge_and_giants() {
+    fn wall_charge_and_giants() {
         let a = orc();
         let d = target();
-        let good = modify_damage(15, &a, &d, false, 0, Luck::Good, 1.25, &mut Vec::new());
+        let good = modify_damage(15, &a, &d, false, 0, AcrossWall::TowardGreaterX, 1.25, &mut Vec::new());
         assert_eq!(good, 18); // 15 * 1.25 = 18.75, cut to 18
-        let bad = modify_damage(15, &a, &d, false, 0, Luck::Bad, 2.0, &mut Vec::new());
+        let bad = modify_damage(15, &a, &d, false, 0, AcrossWall::TowardSmallerX, 2.0, &mut Vec::new());
         assert_eq!(bad, 7); // 15 / 2 = 7.5, cut to 7
 
         let mut charger = orc();
         charger.abilities = vec![ability::CHARGING];
         // moved 700: (700 * 10 / 350 + 85) = 105, so 100 * 105 / 100
-        assert_eq!(modify_damage(100, &charger, &d, false, 700, Luck::Normal, 2.0, &mut Vec::new()), 105);
+        assert_eq!(modify_damage(100, &charger, &d, false, 700, AcrossWall::No, 2.0, &mut Vec::new()), 105);
         // not above 500: no bonus; and never when shooting
-        assert_eq!(modify_damage(100, &charger, &d, false, 500, Luck::Normal, 2.0, &mut Vec::new()), 100);
-        assert_eq!(modify_damage(100, &charger, &d, true, 700, Luck::Normal, 2.0, &mut Vec::new()), 100);
+        assert_eq!(modify_damage(100, &charger, &d, false, 500, AcrossWall::No, 2.0, &mut Vec::new()), 100);
+        assert_eq!(modify_damage(100, &charger, &d, true, 700, AcrossWall::No, 2.0, &mut Vec::new()), 100);
 
         let mut giant = target();
         giant.giant = true;
@@ -672,7 +679,7 @@ mod tests {
         }
         let hit = |seed| {
             let mut dice = CombatRandom::new(seed, 20);
-            melee_hit(&orc(), &target(), 0, Luck::Normal, 2.0, &mut dice, &mut Vec::new())
+            melee_hit(&orc(), &target(), 0, AcrossWall::No, 2.0, &mut dice, &mut Vec::new())
         };
         assert_eq!(hit(42), hit(42));
     }
@@ -683,7 +690,7 @@ mod tests {
         d.warded_against = vec![School::Chaos];
         d.abilities = vec![ability::BLOCK];
         let mut log = Vec::new();
-        let damage = modify_damage(30, &orc(), &d, false, 0, Luck::Normal, 2.0, &mut log);
+        let damage = modify_damage(30, &orc(), &d, false, 0, AcrossWall::No, 2.0, &mut log);
         let damage = finalize_damage(damage, &d, 0, &mut log);
         assert_eq!(damage, 14); // 30 -> ward 20 -> block (20 * 7 + 5) / 10 = 14
         assert_eq!(

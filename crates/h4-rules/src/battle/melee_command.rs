@@ -102,6 +102,11 @@ fn fighter(state: &BattleState, id: UnitId, rules: &StackRules) -> Result<Fighte
 
 /// Roll one strike's damage (the dice go through the battle, so they are logged).
 /// Nothing is applied yet: simultaneous strikes both roll before any loss.
+///
+/// The exe passes the damage roll whether a castle wall stands between the two
+/// (`1701f0` from the striker's center to the victim's, [`crate::battle::wall_line`]).
+/// Castles aren't in the battle state yet (#74), so here it is always
+/// [`crate::damage::AcrossWall::No`], the default of [`HitOptions`].
 fn roll_strike(state: &mut BattleState, from: &Fighter, to: &Fighter, moved: i32) -> i32 {
     roll_hit(state, from, to, HitOptions { moved, ..HitOptions::default() })
 }
