@@ -25,6 +25,7 @@ pub mod luck;
 pub mod melee;
 pub mod melee_command;
 pub mod move_command;
+pub mod move_points;
 pub mod path;
 pub mod path_prepare;
 pub mod path_template;

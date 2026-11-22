@@ -4,11 +4,13 @@
 
 use h4_rules::battle::melee_command::MeleeContext;
 use h4_rules::battle::path::DIRECTIONS;
+use h4_rules::battle::move_points::MoveModifiers;
 use h4_rules::battle::move_command::{
     approach_and_attack, attack_positions_against, destination, move_unit, search_for, AttackOrder, MoveRules,
 };
 use h4_rules::battle::state::{BattleState, CombatEvent, UnitId, UnitPosition};
 use h4_rules::battlefield::{BattlefieldGrid, CellSurface, FLAG_BLOCKED};
+use h4_rules::effects::effect;
 use h4_rules::creatures::CreatureStats;
 use h4_state::army::{Army, ArmyId, MapArmy, Stack, SLOTS};
 use h4_state::Pos;
@@ -106,6 +108,18 @@ fn a_far_target_is_approached_as_far_as_the_movement_goes() {
     assert_eq!(report.to, (50, 47));
     assert_eq!(report.cost, 700);
     assert_eq!(report.path.len(), 7);
+}
+
+#[test]
+fn the_movement_points_come_from_the_table_and_take_the_effects() {
+    let (mut state, a, _) = battle(open_field(), 1, (50, 40), (40, 70));
+    // Move 20 in the stats: 2000 points, a walk of 20 straight cells.
+    assert_eq!(state.movement_points(a, &MoveModifiers::default()), Ok(2000));
+    let slowed = MoveModifiers { effects: vec![effect::SLOW], ..Default::default() };
+    let points = state.movement_points(a, &slowed).unwrap();
+    assert_eq!(points, 1000);
+    let report = move_unit(&mut state, a, (50, 60), &MoveRules::plain(points), no_zones).unwrap();
+    assert_eq!(report.to, (50, 50));
 }
 
 #[test]

@@ -44,6 +44,8 @@ pub mod ability {
     /// Doubles damage against "giant" targets in melee.
     pub const MELEE_GIANTSLAYER: u8 = 0x2b;
     pub const NEGATE_MIND_IMMUNITY: u8 = 0x2d;
+    /// Extra combat movement in a battle at sea (`1ef750`).
+    pub const SEA_BONUS: u8 = 0x3a;
     pub const SPELL_VULNERABILITY: u8 = 0x3f;
     /// Medusa's stone gaze: extra damage based on the target's hit points, after the
     /// checks of effect 0x98 (the spell `stone_gaze`: may it touch this target, how much of
