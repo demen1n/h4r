@@ -442,3 +442,16 @@ and the command mode on a few bases and bonuses, then random cases. Boundaries: 
 table holds only the fixture's `Move` (its "loaded" flag is set instead of reading
 `table.creatures`), abilities and effects are byte lookups, the army and artifact bonuses,
 the at-sea byte and the mode are plain fields.
+
+```sh
+.venv/bin/python tools/testbench/terrain_costs.py --exe bin/heroes4.exe \
+  --out crates/h4-rules/tests/terrain_costs_vectors.tsv
+```
+
+`terrain_costs.py`: 1200 terrain cost lists of a combat creature (`225320` whole: the real
+vector insert and arena `new`, the real static tables and MSVC `std::sort`) over terrain
+walk, the hero skill level, movement thresholds and the cheaper-terrain answers; then 1200
+terrain bit queries under a footprint (`224f60` whole on a 102×102 field with random
+terrain bytes and flags, the footprint from the real `1fc340`). Boundaries: `484a10` (the
+terrain index mapping for types 9–18, never read for 1–8) answers 0, the creature's
+virtual accessors and `t_battlefield_cell::get_creature`.

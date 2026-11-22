@@ -167,6 +167,36 @@ fn blocked_cells_of_the_field_are_walked_around() {
 }
 
 #[test]
+fn swamp_on_the_way_costs_more_through_the_terrain_bits_and_the_cost_list() {
+    use h4_rules::battle::terrain_costs::{as_entry_costs, terrain_costs, TerrainCostInput};
+    use std::collections::HashMap;
+    let mut field = BattlefieldGrid::standard(CellSurface { terrain: 1, flags: 0x10 });
+    // A band of swamp (terrain 3) across the way: columns 42..=44 of rows 30..=70.
+    for x in 30..=70 {
+        for y in 42..=44 {
+            field.surface_mut(x, y).unwrap().terrain = 3;
+        }
+    }
+    let (mut state, a, _) = battle(field, 1, (50, 40), (50, 70));
+    let movement = state.movement_points(a, &MoveModifiers::default()).unwrap();
+    let costs = as_entry_costs(&terrain_costs(&TerrainCostInput { movement, ..Default::default() }));
+    // The terrain bits are read before the move: the state is borrowed mutably by it.
+    let mut bits = HashMap::new();
+    for x in 0..102 {
+        for y in 0..102 {
+            if let Ok(b) = state.terrain_bits((x, y), 1, Some(a)) {
+                bits.insert((x, y), b);
+            }
+        }
+    }
+    let terrain = |at: (i32, i32)| bits.get(&at).copied().unwrap_or(0);
+    let rules = MoveRules { terrain: &terrain, costs: &costs, ..MoveRules::plain(movement) };
+    let report = move_unit(&mut state, a, (50, 46), &rules, no_zones).unwrap();
+    // Three swamp cells at 150 and three grass cells at 100.
+    assert_eq!(report.cost, 750);
+}
+
+#[test]
 fn only_the_active_unit_moves_and_a_failed_move_changes_nothing() {
     let (mut state, a, t) = battle(open_field(), 1, (50, 40), (50, 70));
     let before = state.clone();

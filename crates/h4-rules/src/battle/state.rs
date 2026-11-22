@@ -551,6 +551,29 @@ impl BattleState {
         Ok(movement_points(base, modifiers))
     }
 
+    /// Terrain bits under a footprint of `size` with its corner at `corner`, as the path
+    /// finder sees them for `mover` (`224f60`, see [`super::terrain_costs`]): before a
+    /// search the exe refreshes the combat terrain map for the mover (`225260`), so the
+    /// special bits of the cells under the mover itself don't count. With `None` all of
+    /// them count, as when the map is built (`224e50`). Terrain types 9 and above are an
+    /// error (their bits aren't ported).
+    pub fn terrain_bits(&self, corner: (i32, i32), size: u8, mover: Option<UnitId>) -> Result<u32, String> {
+        let own = match mover {
+            Some(id) => {
+                let at = self.unit(id).and_then(|u| u.position).ok_or("the mover is not on the field")?;
+                Some(at)
+            }
+            None => None,
+        };
+        // A cell is the mover's when its footprint covers it.
+        let is_own = |cell: (i32, i32)| {
+            own.is_some_and(|p| {
+                crate::battlefield::CombatFootprint { size: p.size }.contains(cell.0 - p.at.0, cell.1 - p.at.1)
+            })
+        };
+        super::terrain_costs::footprint_terrain_bits(&self.data.field, corner, size, |cell| !is_own(cell))
+    }
+
     /// Begin a round with an externally computed permutation of living units.
     /// This is queue bookkeeping, not a choice of the game's initiative rules.
     pub fn begin_round(&mut self, order: &[UnitId]) -> Result<(), String> {
