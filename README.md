@@ -165,6 +165,14 @@ cargo run --release -p h4-viewer --bin h4-battlefield -- "/path/to/Heroes IV/dat
 
 Left/right selects a backdrop, up/down selects scenery, and clicking places its anchor (yellow cross). `G` toggles the grid and snapping, `Space` pauses animation, `S` toggles shadows, and `Esc` exits. `H4_GRID=1` enables the grid on startup. `B` toggles battle-on-bridge context (`H4_BRIDGE=1` enables it on startup): code 0 blocks outside the deck on a bridge, and inherits the underlying field on land. Context is selected independently of the resource name. Rendering preserves layer coordinates and the stored animation offset. `H4_SCREENSHOT=out.png` captures a frame and exits. Grid colors show the preset overlay: red blocks, green clears blocking, orange inherits the underlying field, gray is unrecognized. Pink outlines mark the selected obstacle’s resolved segment footprints, including rectangular compound models. Image-dependent segmentation and cropping at native scale are checked against the executable. `H4_SCENERY` selects an object by its full resource name. The first entry, "no preset", is an ordinary battle field. `O` places obstacles automatically with the original rules (`H4_OBSTACLES=1` on startup), `R` changes the battle seed (`H4_SEED`), `T` changes the ground under the backdrop. Obstacles are drawn far to near; the game's depth sorting and the closed-area pass are not ported. The underlying ground is chosen by hand (the game derives it from the adventure map), and a playable battle is not implemented here.
 
+### Battle sandbox
+
+```sh
+H4_ARMIES="orc:30,troll:4 vs skeleton:40,ghost:8" cargo run --release -p h4-viewer --bin h4-sandbox -- "/path/to/Heroes IV/data"
+```
+
+Two armies (creature keyword:count, up to 7 stacks each) fight on a plain field, both sides played by hand. Deployment, initiative and turns, movement points, the path search, zones of control, the attack position and approach, damage, retaliation, shots and facing come from the rules ported from the original (`h4_rules::battle`). Click a cell to move the active stack, an enemy to attack it (stacks with shots shoot), `W` waits, `D` defends, `G` toggles the grid, `Esc` exits. `H4_SEED` sets the battle seed; `H4_ORDERS="50,40;w;d"` runs orders (cells, `w`, `d`) and `H4_SCREENSHOT=out.png` saves a frame after them. Not there yet: backdrop, terrain and obstacles, per-creature abilities (every stack walks), shot penalties, morale, heroes, spells, AI.
+
 ### Animation viewer
 
 ```sh

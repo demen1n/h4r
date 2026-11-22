@@ -192,6 +192,7 @@ dependencies = [
  "env_logger",
  "h4-formats",
  "h4-rules",
+ "h4-state",
  "log",
  "macroquad",
 ]
