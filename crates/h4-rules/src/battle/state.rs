@@ -533,12 +533,9 @@ impl BattleState {
     /// centers in 1/65536 of a cell, then the direction `11ede0`). Both must stand on
     /// the field.
     pub fn facing_toward(&self, who: UnitId, whom: UnitId) -> Result<u8, String> {
-        let center = |id: UnitId| -> Result<(i32, i32), String> {
-            let at = self.unit(id).and_then(|u| u.position).ok_or("the unit is not on the field")?;
-            let half = i32::from(at.size) * 0x8000;
-            Ok((at.at.0 * 0x10000 + half, at.at.1 * 0x10000 + half))
-        };
-        Ok(super::path_prepare::direction(center(who)?, center(whom)?) as u8)
+        let place = |id: UnitId| self.unit(id).and_then(|u| u.position).ok_or("the unit is not on the field");
+        let (a, b) = (place(who)?, place(whom)?);
+        Ok(super::facing::toward(a.at, a.size, b.at, b.size))
     }
 
     /// Begin a round with an externally computed permutation of living units.

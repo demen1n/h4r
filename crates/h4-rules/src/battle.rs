@@ -19,6 +19,7 @@
 
 pub mod attack_angles;
 pub mod deployment;
+pub mod facing;
 pub mod initiative;
 pub mod luck;
 pub mod melee;
