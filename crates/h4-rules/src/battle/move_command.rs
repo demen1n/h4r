@@ -46,7 +46,8 @@ use crate::battlefield::{BattlefieldGrid, FLAG_BLOCKED};
 /// What the rules know about the moving unit beyond the state.
 #[derive(Clone, Copy)]
 pub struct MoveRules<'a> {
-    /// Movement points (virtual `+0x18` of the stats). A plain straight step costs 100.
+    /// Movement points (virtual `+0x18` of the stats, `1ef750`): take them from
+    /// [`BattleState::movement_points`]. A plain straight step costs 100.
     pub movement: i32,
     /// Flies for the path search: no effect 7, and ability `flying` or effect 0x2e.
     pub flies: bool,

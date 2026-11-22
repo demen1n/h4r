@@ -8,11 +8,17 @@ use crate::damage::ability;
 /// Effect ids read from the exe keyword pairs at VA 0x994ac0.
 /// These are spell/effect ids, a different namespace from creature abilities.
 pub mod effect {
+    pub const AGING: u8 = 0x01;
     pub const ANTI_MAGIC: u8 = 0x03;
+    pub const BIND_FLYER: u8 = 0x07;
     pub const BLIND: u8 = 0x0b;
     pub const COLD_RESISTANCE: u8 = 0x14;
     pub const FIRE_RESISTANCE: u8 = 0x28;
+    pub const HASTE: u8 = 0x37;
+    pub const NATURE_HASTE: u8 = 0x68;
+    pub const ORDER_SLOW: u8 = 0x69;
     pub const SANCTUARY: u8 = 0x89;
+    pub const SLOW: u8 = 0x8d;
     pub const STONE_GAZE: u8 = 0x98;
 }
 

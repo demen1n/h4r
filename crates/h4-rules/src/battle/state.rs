@@ -538,6 +538,19 @@ impl BattleState {
         Ok(super::facing::toward(a.at, a.size, b.at, b.size))
     }
 
+    /// Movement points of a unit this turn (`1ef750`, see [`super::move_points`]): the
+    /// base from the state (a creature's `Move` × 100, a hero 2400) with the
+    /// modifiers the state doesn't keep yet (bonuses, abilities, effects, the sea).
+    /// This is the value for [`super::move_command::MoveRules::movement`].
+    pub fn movement_points(&self, id: UnitId, modifiers: &super::move_points::MoveModifiers) -> Result<i32, String> {
+        use super::move_points::{creature_base, movement_points, HERO_BASE};
+        let base = match &self.unit(id).ok_or("no such unit")?.kind {
+            UnitKind::Creature { stats, .. } => creature_base(stats.movement),
+            UnitKind::Hero(_) => HERO_BASE,
+        };
+        Ok(movement_points(base, modifiers))
+    }
+
     /// Begin a round with an externally computed permutation of living units.
     /// This is queue bookkeeping, not a choice of the game's initiative rules.
     pub fn begin_round(&mut self, order: &[UnitId]) -> Result<(), String> {

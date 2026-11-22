@@ -428,3 +428,17 @@ then `11ede0`) on random corners and sizes 1–8, a quarter of them near neighbo
 cases of `11ee50` followed by `11edb0` (the flight's straight line) on random points in
 1/16 of a cell, a fifth of them exact diagonals and straight lines. Boundary: the footprint
 size (virtual `+8`).
+
+```sh
+.venv/bin/python tools/testbench/move_points.py --exe bin/heroes4.exe \
+  --out crates/h4-rules/tests/move_points_vectors.tsv
+```
+
+`move_points.py`: 1500 cases of a combat creature's movement points (`1ef750`) executed
+whole, with the base from the real vftables of the army member: a creature (`23d5b0` →
+`255370`, the traits' `Move` × 100) or a hero (`32a1f0`). Every combination of the sea
+flag, `sea_bonus`, the effects (aging, bind flyer, haste, nature haste, order slow, slow)
+and the command mode on a few bases and bonuses, then random cases. Boundaries: the traits
+table holds only the fixture's `Move` (its "loaded" flag is set instead of reading
+`table.creatures`), abilities and effects are byte lookups, the army and artifact bonuses,
+the at-sea byte and the mode are plain fields.
