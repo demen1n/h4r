@@ -228,8 +228,9 @@ stored in the vectors. See `decomp/combat_object.md` for remaining boundaries.
 
 ```sh
 .venv/bin/python tools/testbench/obstacle_placer.py --exe bin/heroes4.exe \
-  --vectors crates/h4-rules/tests/obstacle_placer_vectors.tsv
-cargo test -p h4-rules --test obstacle_placer_vectors --locked
+  --vectors crates/h4-rules/tests/obstacle_placer_vectors.tsv \
+  --carving-vectors crates/h4-rules/tests/obstruction_vectors.tsv
+cargo test -p h4-rules --test obstacle_placer_vectors --test obstruction_vectors --locked
 # the same against the installed headers and weights table (not stored):
 .venv/bin/python tools/testbench/obstacle_placer.py --exe bin/heroes4.exe --inputs installed
 ```
@@ -238,9 +239,17 @@ Runs the original weights-table parser (2089a0) and the whole placer (208ec0,
 20a270: start areas, paths, breadth-first walk, weights, choice, bookkeeping) on
 fields built by the original geometry, cell and edge code (34db60, 183560,
 162cb0), with the original combat RNG. Replaced: the header-table and table
-caches (given data), model loading (size and type), object creation (position
-recorded), image scale, profiler, `atexit`, critical sections. The final
-obstruction pass is skipped (not ported). Inputs come from
+caches (given data), model loading (size and type), image scale, profiler,
+`atexit`, critical sections, the footprint cache 1fc590 (footprints from the real
+1fc340) and the direction offsets (305860). The final obstruction pass
+(t_combat_obstruction_finder 20b480..20bcf0, clear_rect 209040, 1651e0/183a10,
+20e900/20dfd0, the heap and cover marking) runs natively on real cell lists:
+object creation (1772e0) is replaced by fixture objects, one per square segment
+of side gcd(w, h) of a blocking model, linked into the field's list +0x44c and
+the cells of their round footprints; removal (164080) unlinks and records them.
+The bench records the corner of every cleared 7x7 square, the path ends and
+the removed segments (24 synthetic scenarios: 99 paths, 361 segments).
+Inputs come from
 `crates/h4-rules/examples/support/obstacle_case.rs` (synthetic) or the game.
 About two minutes for 24 scenarios. See `decomp/obstacle_placement.md`.
 

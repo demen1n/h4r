@@ -17,6 +17,7 @@
 //! - [`turns`]: ending a turn and what a new day brings.
 //! - [`battlefield`]: combat field cells, presets and obstacle footprints.
 //! - [`obstacle_placement`]: random scenery on a combat field.
+//! - [`obstruction`]: clearing ways to parts of the field the scenery cut off.
 
 pub mod artifacts;
 pub mod battle;
@@ -28,6 +29,7 @@ pub mod heroes;
 pub mod movement;
 pub mod new_game;
 pub mod obstacle_placement;
+pub mod obstruction;
 pub mod placement;
 pub mod random;
 pub mod turns;

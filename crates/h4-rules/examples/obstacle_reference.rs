@@ -6,9 +6,11 @@
 //!   data needed) or `installed` (headers and `table.combat_obstacles` of the
 //!   game in `<data>`; empty `<data>` means the usual search).
 //! - `dump`: what the bench gives the original code — models (`w h type
-//!   blocks`), our parse of the weights table, the table's cells, then every
+//!   blocks skip`), our parse of the weights table, the table's cells, then every
 //!   scenario with its cells.
 //! - `place`: our placements, one line per scenario: `placed` and `model x y` triples.
+//! - `carve`: our obstruction pass after placement, one line per scenario
+//!   (`obstacle_case::carve`).
 #[path = "support/obstacle_case.rs"]
 mod obstacle_case;
 
@@ -24,7 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let [data, inputs, mode, count] = args.as_slice() else {
         return Err(
-            "usage: obstacle_reference <data> <synthetic|installed> <dump|place> <count>".into(),
+            "usage: obstacle_reference <data> <synthetic|installed> <dump|place|carve> <count>".into(),
         );
     };
     let (models, table): (Vec<CombatHeaderEntry>, Table) = if inputs == "installed" {
@@ -48,9 +50,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let [w, h_] = h.properties;
             writeln!(
                 out,
-                "{w} {h_} {} {}",
+                "{w} {h_} {} {} {}",
                 h.resolved_type(),
-                u8::from(h.blocks())
+                u8::from(h.blocks()),
+                u8::from(h.skips_blocking())
             )?;
         }
         let layout: Vec<String> = weights.exe_layout().iter().map(i32::to_string).collect();
@@ -86,6 +89,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let grid = obstacle_case::field(s);
         let mut random = CombatRandom::new(s.seed, 1);
         let placed = place_obstacles(&grid, &models, &weights, &s.context, &mut random);
+        if mode == "carve" {
+            let mut grid = grid;
+            writeln!(out, "{}", obstacle_case::carve(&mut grid, &models, &placed, &s.context))?;
+            continue;
+        }
         let parts: Vec<String> = placed
             .iter()
             .map(|p| format!("{} {} {}", p.model, p.at.0, p.at.1))
