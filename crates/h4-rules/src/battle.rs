@@ -24,6 +24,7 @@ pub mod initiative;
 pub mod luck;
 pub mod melee;
 pub mod melee_command;
+pub mod morale;
 pub mod move_command;
 pub mod move_points;
 pub mod path;

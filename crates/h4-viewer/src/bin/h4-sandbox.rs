@@ -18,7 +18,7 @@
 //! retaliation, shots and shooting back, facing. What is not: no backdrop, terrain or obstacles (a plain
 //! field), no creature abilities (the per-creature ability lists aren't read yet: every
 //! stack walks, shooters are the stacks with shots), no shot penalties (range and
-//! obstacles are ported but not fed here), morale 0, no heroes, no spells, no AI.
+//! obstacles are ported but not fed here), morale from alignments and losses only, no heroes, no spells, no AI.
 
 use std::collections::HashMap;
 
@@ -33,7 +33,8 @@ use h4_rules::battle::melee_command::{ranged_attack, MeleeContext, RangedContext
 use h4_rules::battle::retaliation::abilities::RANGED;
 use h4_rules::battle::move_command::{approach_and_attack, attack_positions_against, move_unit, AttackOrder, MoveRules};
 use h4_rules::battle::move_points::MoveModifiers;
-use h4_rules::battle::state::{BattleState, CombatEvent, UnitId, UnitKind};
+use h4_rules::battle::morale::StrengthEffects;
+use h4_rules::battle::state::{BattleState, CombatEvent, MoraleSources, UnitId, UnitKind};
 use h4_rules::battle::zone_of_control::{zones_for, ZoneTraits};
 use h4_rules::battle::Side;
 use h4_rules::battlefield::{BattlefieldGrid, CellSurface, CombatFootprint, FLAG_10};
@@ -179,8 +180,19 @@ fn next_turn(battle: &mut BattleState) -> Result<Option<UnitId>, String> {
     if let Some(unit) = battle.begin_next_turn()? {
         return Ok(Some(unit));
     }
-    // Speeds from the table; morale 0 (no heroes, no morale rules here).
-    let stats: Vec<_> = battle
+    // Morale as the game does it: the army's alignments and, from the second round,
+    // the loss penalty. Abilities aren't loaded here, so undead and mechanical
+    // creatures aren't recognized; no spells, no heroes' auras.
+    battle.update_loss_penalties(|_| StrengthEffects::default());
+    let nothing = |_: UnitId, _: u8| false;
+    let sources = MoraleSources {
+        member_bonus: 0,
+        member_morale_effect: false,
+        influence: 0,
+        has_ability: &nothing,
+        has_effect: &|_| false,
+    };
+    let stats = battle
         .units()
         .iter()
         .map(|u| {
@@ -188,9 +200,9 @@ fn next_turn(battle: &mut BattleState) -> Result<Option<UnitId>, String> {
                 UnitKind::Creature { stats, .. } => stats.speed,
                 UnitKind::Hero(_) => 0,
             };
-            (u.id, InitiativeStats { speed, morale: 0 })
+            Ok((u.id, InitiativeStats { speed, morale: battle.morale(u.id, &sources)? }))
         })
-        .collect();
+        .collect::<Result<Vec<_>, String>>()?;
     battle.begin_initiative_round(&stats)?;
     battle.begin_next_turn()
 }
