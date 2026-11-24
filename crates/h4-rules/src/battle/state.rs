@@ -24,7 +24,7 @@ use crate::creatures::CreatureStats;
 use crate::random::{CombatDice, CombatRandom};
 
 /// Version of our JSON fixture, not the original game's saved-battle format.
-pub const SNAPSHOT_VERSION: u32 = 5;
+pub const SNAPSHOT_VERSION: u32 = 6;
 
 /// Stable within one battle. Also the occupant ID in the collision grid and the
 /// ID passed to combat dice. IDs are never vector indices or adventure army IDs.
@@ -200,6 +200,15 @@ pub enum CombatEvent {
         unit: UnitId,
         facing: u8,
     },
+    /// The first round recorded the sides' strength for the morale.
+    MoraleStrength {
+        strength: [i32; 2],
+    },
+    /// A side's loss penalty changed at the start of a round.
+    LossPenalty {
+        side: Side,
+        penalty: i32,
+    },
     /// The active unit walked from one corner cell to another; `cost` is the
     /// path cost of the destination (the exe's "moved this turn").
     Moved {
@@ -231,6 +240,32 @@ struct BattleData {
     turns: TurnQueue,
     random: CombatRandom,
     events: Vec<CombatEvent>,
+    /// The sides' strength at the first round and their current loss penalties (v6).
+    morale: MoraleLosses,
+}
+
+/// What the battlefield keeps for the morale of the two sides (index 0 attacker).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct MoraleLosses {
+    /// Strength at the start of the first round (`battlefield+0x454`); `None` before it.
+    pub initial: Option<[i32; 2]>,
+    /// The loss penalty each side's units carry in their morale base (`+0x40c`).
+    pub penalty: [i32; 2],
+}
+
+/// What the state doesn't keep for a unit's morale yet: the caller supplies it.
+pub struct MoraleSources<'a> {
+    /// The army member's own bonus (`+0x14` of the stack or hero: adventure-map visits
+    /// and the like) and whether it is under the "morale" spell on the map.
+    pub member_bonus: i32,
+    pub member_morale_effect: bool,
+    /// The strongest aura on the unit in this battle (`+0xaec`; heroes' skills, #71).
+    pub influence: i32,
+    /// Abilities of a unit (`undead` counts for the whole army, `undead` and
+    /// `mechanical` zero the unit's own morale), ids of [`crate::damage::ability`].
+    pub has_ability: &'a dyn Fn(UnitId, u8) -> bool,
+    /// Combat effects on this unit, ids of [`super::morale::effect`].
+    pub has_effect: &'a dyn Fn(u8) -> bool,
 }
 
 /// Read access is shared; mutations go through methods that also write events.
@@ -406,6 +441,7 @@ impl BattleState {
                 turns: TurnQueue::default(),
                 random: CombatRandom::new(seed, modulus),
                 events: vec![CombatEvent::Created { seed }],
+                morale: MoraleLosses::default(),
             },
         };
         state.validate()?;
@@ -549,6 +585,103 @@ impl BattleState {
             UnitKind::Hero(_) => HERO_BASE,
         };
         Ok(movement_points(base, modifiers))
+    }
+
+    /// A side's strength for the morale (`1f5350` summed over its creatures): hit
+    /// points, number and wounds from the state, effects from the caller. Heroes add
+    /// nothing yet: their combat hit points are not recovered (#71).
+    pub fn side_strength(&self, side: Side, effects: impl Fn(UnitId) -> super::morale::StrengthEffects) -> i32 {
+        self.data
+            .units
+            .iter()
+            .filter(|u| u.side == side)
+            .fold(0i32, |sum, u| match &u.kind {
+                UnitKind::Creature { stats, count, wounds, .. } => {
+                    sum.wrapping_add(super::morale::strength(*count, stats.hit_points, *wounds, &effects(u.id)))
+                }
+                UnitKind::Hero(_) => sum,
+            })
+    }
+
+    /// The morale bookkeeping at the start of a round (`16f2c0`), to call before
+    /// [`Self::begin_initiative_round`]: the first time it records the sides' strength
+    /// (`1761e0`), later it recomputes the loss penalties (`176250`). Returns them.
+    pub fn update_loss_penalties(&mut self, effects: impl Fn(UnitId) -> super::morale::StrengthEffects) -> [i32; 2] {
+        let now = [self.side_strength(Side::Attacker, &effects), self.side_strength(Side::Defender, &effects)];
+        let Some(initial) = self.data.morale.initial else {
+            self.data.morale.initial = Some(now);
+            self.data.events.push(CombatEvent::MoraleStrength { strength: now });
+            return self.data.morale.penalty;
+        };
+        let penalty = super::morale::loss_penalties(initial, now);
+        for (index, side) in [Side::Attacker, Side::Defender].into_iter().enumerate() {
+            if penalty[index] != self.data.morale.penalty[index] {
+                self.data.events.push(CombatEvent::LossPenalty { side, penalty: penalty[index] });
+            }
+        }
+        self.data.morale.penalty = penalty;
+        penalty
+    }
+
+    pub fn morale_losses(&self) -> MoraleLosses {
+        self.data.morale
+    }
+
+    /// The morale a unit's army gives it (`23fe40`): its alignment (a creature's from
+    /// its stats, a hero's from its class) against every alignment in its army.
+    pub fn army_morale(&self, id: UnitId, has_ability: &dyn Fn(UnitId, u8) -> bool) -> Result<i32, String> {
+        use super::morale::{army_morale, ArmyMember};
+        let unit = self.unit(id).ok_or("no such unit")?;
+        let member = |u: &BattleUnit| -> Result<ArmyMember, String> {
+            Ok(match &u.kind {
+                UnitKind::Creature { stats, initial_count, .. } => ArmyMember {
+                    alignment: stats.alignment,
+                    // The army as it came: a stack that died in battle still counts.
+                    count: *initial_count,
+                    undead: has_ability(u.id, crate::damage::ability::UNDEAD),
+                },
+                UnitKind::Hero(hero) => ArmyMember {
+                    alignment: crate::heroes::BASE_CLASSES
+                        .get(hero.class)
+                        .ok_or_else(|| format!("unknown hero class {}", hero.class))?
+                        .alignment,
+                    count: 1,
+                    undead: false,
+                },
+            })
+        };
+        let own = member(unit)?.alignment;
+        let members = self
+            .data
+            .units
+            .iter()
+            .filter(|u| u.side == unit.side)
+            .map(member)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(army_morale(own, &members))
+    }
+
+    /// A unit's effective morale (`1efbd0`) for [`super::initiative::InitiativeStats`]:
+    /// the base it brought (its own morale and its army's) plus its side's loss penalty,
+    /// the aura, then the getter's abilities, effects and limits.
+    pub fn morale(&self, id: UnitId, sources: &MoraleSources) -> Result<i32, String> {
+        use super::morale::{effect, effective_morale, member_morale, MoraleInputs};
+        use crate::damage::ability;
+        let unit = self.unit(id).ok_or("no such unit")?;
+        let base = member_morale(sources.member_bonus, sources.member_morale_effect)
+            + self.army_morale(id, sources.has_ability)?
+            + self.data.morale.penalty[side_index(unit.side)];
+        let on = |e| (sources.has_effect)(e);
+        Ok(effective_morale(&MoraleInputs {
+            base,
+            influence: sources.influence,
+            undead: (sources.has_ability)(id, ability::UNDEAD),
+            mechanical: (sources.has_ability)(id, ability::MECHANICAL),
+            sorrow: on(effect::SORROW),
+            spiritual_fervor: on(effect::SPIRITUAL_FERVOR),
+            morale_effect: on(effect::MORALE),
+            despair: on(effect::DESPAIR),
+        }))
     }
 
     /// Terrain bits under a footprint of `size` with its corner at `corner`, as the path
@@ -1449,10 +1582,33 @@ impl BattleState {
                 }
                 CombatEvent::Rolled { .. } => true,
                 CombatEvent::Created { seed } => *seed == random.seed,
+                CombatEvent::MoraleStrength { .. } | CombatEvent::LossPenalty { .. } => true,
             };
             if !valid {
                 return Err("invalid battle log entry".into());
             }
+        }
+        // The morale bookkeeping is what its events say: the recorded strength, and each
+        // side's latest penalty (0 if none was logged).
+        let mut logged = MoraleLosses::default();
+        for event in &data.events {
+            match event {
+                CombatEvent::MoraleStrength { strength } => {
+                    if logged.initial.replace(*strength).is_some() {
+                        return Err("the sides' strength was recorded twice".into());
+                    }
+                }
+                CombatEvent::LossPenalty { side, penalty } => {
+                    if logged.initial.is_none() {
+                        return Err("a loss penalty before the sides' strength".into());
+                    }
+                    logged.penalty[side_index(*side)] = *penalty;
+                }
+                _ => {}
+            }
+        }
+        if logged != data.morale {
+            return Err("morale bookkeeping does not match its log".into());
         }
         Ok(())
     }

@@ -10,6 +10,8 @@ ID армий, владельцев, пустые слоты и героев. К
 use h4_rules::battle::BattleState;
 use h4_rules::battle::deployment::Formation;
 use h4_rules::battle::initiative::InitiativeStats;
+use h4_rules::battle::morale::StrengthEffects;
+use h4_rules::battle::state::{MoraleSources, UnitId};
 
 // attacker/defender: &MapArmy; creatures: &[CreatureStats].
 // field: a prepared BattlefieldGrid, with terrain and scenery occupants.
@@ -23,11 +25,21 @@ battle.deploy_initial([Formation::Loose, Formation::Square], &sizes)?;
 let fixture = battle.to_json()?;
 let mut restored = BattleState::from_json(&fixture)?;
 
-// Explicit fixture stats; real callers supply effective speed and morale
-// after resolving hero skills, artifacts, spells and morale immunities.
+// Morale (#61, decomp/morale.md): the sides' strength on the first round, loss
+// penalties later; then each unit's effective morale. What the state doesn't keep
+// (abilities, effects, the member's map bonus, auras) comes from the caller.
+restored.update_loss_penalties(|_| StrengthEffects::default());
+let nothing = |_: UnitId, _: u8| false;
+let sources = MoraleSources {
+    member_bonus: 0,
+    member_morale_effect: false,
+    influence: 0,
+    has_ability: &nothing,
+    has_effect: &|_| false,
+};
 restored.begin_initiative_round(&[
-    (ids[0], InitiativeStats { speed: 5, morale: 0 }),
-    (ids[1], InitiativeStats { speed: 8, morale: 0 }),
+    (ids[0], InitiativeStats { speed: 5, morale: restored.morale(ids[0], &sources)? }),
+    (ids[1], InitiativeStats { speed: 8, morale: restored.morale(ids[1], &sources)? }),
 ])?;
 let active = restored.begin_next_turn()?;
 let roll = restored.roll(ids[0].0, ids[1].0, 0);
@@ -69,8 +81,9 @@ ID участников выделяются с 1, обходя уже заня�
 ## Снимки и проверки
 
 `to_json`/`from_json` сохраняют начальное состояние и состояние между операциями,
-включая активный ход. Формат имеет собственную версию (`SNAPSHOT_VERSION = 5`)
-и не совместим с сейвами оригинала; снимки v1–v4 отклоняются (v5 добавила направление взгляда). Загрузка проверяет версию, геометрию поля,
+включая активный ход. Формат имеет собственную версию (`SNAPSHOT_VERSION = 6`)
+и не совместим с сейвами оригинала; снимки v1–v5 отклоняются (v5 добавила направление взгляда,
+v6 — учёт морали: начальную силу сторон и штрафы за потери, которые должны совпасть с журналом). Загрузка проверяет версию, геометрию поля,
 ссылки ID/слотов, численность/HP/выстрелы, соответствие позиций занятости клеток,
 очередь и структуру RNG. Броски из журнала повторяются на новом генераторе с тем
 же зерном: значения и итоговые счётчики/checkpoints должны совпасть с сохранёнными,

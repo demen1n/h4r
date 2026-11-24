@@ -260,6 +260,14 @@ height and move bookkeeping are fixture inputs. The full creature constructor,
 AI rearrangement, siege/tower and bridge contexts are outside this fixture.
 See `decomp/deployment.md` and `cargo test -p h4-rules --test deployment`.
 
+Combat morale (#61): `morale.py --exe bin/heroes4.exe --out
+crates/h4-rules/tests/morale_vectors.tsv` executes the army's morale (23fe40 with the
+alignment relation 11ecd0, over real t_creature / t_hero vftables), the morale getters
+(1efbd0, 1efb90), a stack's strength (1f5350 with 0, -1) and the loss penalty update
+(176250): 708 + 920 + 800 + 500 fixtures. Traits records, abilities, effects, hit points
+and per-unit strength in 176250 are fixture inputs. See `decomp/morale.md` and
+`cargo test -p h4-rules --test morale_vectors`.
+
 Native initiative, wait and defense (#60):
 `initiative.py --exe bin/heroes4.exe --out PATH` records 1,619 fixtures from native
 selection/comparison, morale classification/RNG and stance arithmetic. Includes
