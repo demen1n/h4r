@@ -366,6 +366,28 @@ impl PathSearch {
         self.queue.clear();
     }
 
+    /// Is anything queued?
+    pub(crate) fn has_queued(&self) -> bool {
+        !self.queue.is_empty()
+    }
+
+    /// Take the cheapest queued point: its cell and the copy of the record taken when it
+    /// was queued (the same heap order as [`Self::run`]).
+    pub(crate) fn pop_queued(&mut self) -> Option<((i32, i32), PathCell)> {
+        self.pop().map(|point| (point.at, point.cell))
+    }
+
+    /// The finder's general `push` (`20e550`): skip the point if its cell is already
+    /// reached at no greater cost (compared unsigned); otherwise queue it and store the
+    /// record. (`20d200` has its own copy of this code; the obstruction finder uses this.)
+    pub(crate) fn offer(&mut self, at: (i32, i32), cell: PathCell) {
+        let old = self.map.cell(at).expect("the caller checked the bounds");
+        if old.flags & flags::REACHED != 0 && old.cost <= cell.cost {
+            return;
+        }
+        self.put(at, cell);
+    }
+
     /// Store the record and queue a copy of it.
     pub(crate) fn put(&mut self, at: (i32, i32), cell: PathCell) {
         *self.map.cell_mut(at).expect("the caller checked the bounds") = cell;

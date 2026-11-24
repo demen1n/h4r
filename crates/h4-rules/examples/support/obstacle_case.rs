@@ -8,8 +8,9 @@
 
 use h4_formats::combat_object::{CombatHeaderEntry, CombatObjectHeader, OBSTACLE_TYPE_NAMES};
 use h4_formats::table::Table;
-use h4_rules::battlefield::{BattlefieldGrid, CellSurface};
-use h4_rules::obstacle_placement::PlacerContext;
+use h4_rules::battlefield::{BattlefieldGrid, CellOccupant, CellSurface, CombatFootprint, PlacedObstacle};
+use h4_rules::obstacle_placement::{ObstaclePlacement, PlacerContext};
+use h4_rules::obstruction::open_cut_off_areas;
 
 /// A small integer hash (xorshift-multiply). Any fixed formula would do; this
 /// one mixes well enough that neighbouring inputs look unrelated.
@@ -189,4 +190,71 @@ pub fn field(scenario: &Scenario) -> BattlefieldGrid {
     }
     grid.block_edges();
     grid
+}
+
+/// Put the placed models on the grid as the bench's object creation does: a blocking
+/// model becomes square segments of side gcd(w, h) (the split of RVA 238690; the exe
+/// drops segments whose cropped image is empty, and synthetic models have none),
+/// non-blocking models add nothing. A segment's ID is `placement << 8 | segment`.
+pub fn put_on_grid(grid: &mut BattlefieldGrid, models: &[CombatHeaderEntry], placed: &[ObstaclePlacement]) {
+    for (index, p) in placed.iter().enumerate() {
+        let header = &models[p.model].header;
+        let [w, h] = header.properties.map(i32::from);
+        if !header.blocks() || w == 0 || h == 0 {
+            continue;
+        }
+        let g = gcd(w, h);
+        let mut segment = 0;
+        for i in 0..w / g {
+            for j in 0..h / g {
+                let obstacle = PlacedObstacle {
+                    at: (p.at.0 + i * g, p.at.1 + j * g),
+                    footprint: CombatFootprint { size: g as u8 },
+                    occupant: CellOccupant {
+                        id: (index as u32) << 8 | segment,
+                        skip_blocking: header.skips_blocking(),
+                        blocks: true,
+                    },
+                };
+                grid.add_obstacle(obstacle).expect("placed models stay on the field");
+                segment += 1;
+            }
+        }
+    }
+}
+
+fn gcd(a: i32, b: i32) -> i32 {
+    if b == 0 { a } else { gcd(b, a % b) }
+}
+
+/// Run the obstruction pass after placement (skipped on a bridge, like the exe) and
+/// describe it the way the bench records the original: `carved`, the corner of every
+/// cleared square with `|` after each path, then `removed` and the removed segments as
+/// `placement.segment`, sorted.
+pub fn carve(
+    grid: &mut BattlefieldGrid,
+    models: &[CombatHeaderEntry],
+    placed: &[ObstaclePlacement],
+    context: &PlacerContext,
+) -> String {
+    put_on_grid(grid, models, placed);
+    let mut line = String::from("carved");
+    let mut removed = Vec::new();
+    if !context.on_bridge {
+        let removable = |id: u32| models[placed[(id >> 8) as usize].model].header.resolved_type() < 0x22;
+        let opening = open_cut_off_areas(grid, context.siege.is_some(), removable);
+        for path in &opening.paths {
+            for (x, y) in path {
+                line += &format!(" {x},{y}");
+            }
+            line += " |";
+        }
+        removed = opening.removed;
+    }
+    removed.sort_unstable();
+    line += " removed";
+    for id in removed {
+        line += &format!(" {}.{}", id >> 8, id & 0xff);
+    }
+    line
 }

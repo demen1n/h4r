@@ -1,7 +1,7 @@
 //! Inspect preset backdrops and combat scenery; this is not a playable battle.
 use h4_formats::archive::{data_dir, Resources};
 use h4_formats::battlefield::{BattlefieldPreset, BattlefieldRow};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use h4_formats::combat_object::{CombatHeaderEntry, CombatHeaderTable, CombatObject};
 use h4_formats::sprite::{ActorSequence, Rect};
@@ -12,6 +12,7 @@ use h4_rules::battlefield::{
 use h4_rules::obstacle_placement::{
     place_obstacles, ObstaclePlacement, ObstacleWeights, PlacerContext,
 };
+use h4_rules::obstruction::open_cut_off_areas;
 use h4_rules::random::CombatRandom;
 use macroquad::prelude::*;
 
@@ -95,6 +96,8 @@ struct SceneryPart {
     area: Rect,
     offset: Vec2,
     fps: f32,
+    /// Index of the segment in `CombatObject::segments`, as in the collision ids.
+    segment: usize,
 }
 struct Scenery {
     parts: Vec<SceneryPart>,
@@ -161,7 +164,7 @@ fn scenery(res: &Resources, name: &str, shadow: bool) -> Result<Scenery, String>
         .map_err(|e| e.to_string())?;
     let segments = model.segments().map_err(|e| e.to_string())?;
     let mut parts = Vec::new();
-    for segment in &segments {
+    for (index, segment) in segments.iter().enumerate() {
         // The native crop can retain empty segments. They still take part in
         // collision, but have no pixels to upload.
         let Some(area) = segment.image.bounds() else {
@@ -179,6 +182,7 @@ fn scenery(res: &Resources, name: &str, shadow: bool) -> Result<Scenery, String>
             area,
             offset: vec2(image.offset.0 as f32, image.offset.1 as f32),
             fps: f32::from(model.header.frames_per_second.max(1)),
+            segment: index,
         });
     }
     let collision = if !model.blocks() || model.skips_blocking() {
@@ -201,6 +205,11 @@ fn scenery(res: &Resources, name: &str, shadow: bool) -> Result<Scenery, String>
             model.header.type_id, model.header.type_name, model.header.properties
         ),
     })
+}
+/// Collision id of segment `segment` of automatic obstacle `k` (manual scenery uses
+/// small ids; these start at 1000).
+fn auto_id(k: usize, segment: usize) -> u32 {
+    1000 + 64 * k as u32 + segment as u32
 }
 fn names(res: &Resources, prefix: &str) -> Vec<String> {
     let mut names: Vec<_> = res
@@ -270,6 +279,8 @@ async fn main() {
         .unwrap_or(1);
     let mut ground = 0;
     let mut placed: Vec<ObstaclePlacement> = Vec::new();
+    // Segments of automatic obstacles the obstruction pass removed (collision ids).
+    let mut removed: HashSet<u32> = HashSet::new();
     // Sprites of placed models, by model index; loaded on first use.
     let mut sprites: HashMap<usize, Result<Scenery, String>> = HashMap::new();
     let mut paused = false;
@@ -374,6 +385,7 @@ async fn main() {
         // A blank underlying field is explicit; terrain generation is separate.
         if collision_dirty {
             placed.clear();
+            removed.clear();
             collision = map.as_ref().map(|map| {
                 let mut grid = BattlefieldGrid::from_preset(
                     map,
@@ -401,10 +413,22 @@ async fn main() {
                                 let mut obstacle = segment;
                                 obstacle.at = (p.at.0 + segment.at.0, p.at.1 + segment.at.1);
                                 // Manual scenery uses small ids; these start at 1000.
-                                obstacle.occupant.id = 1000 + 64 * k as u32 + i as u32;
+                                obstacle.occupant.id = auto_id(k, i);
                                 grid.add_obstacle(obstacle)?;
                             }
                         }
+                    }
+                    // Clear ways to the parts the scenery cut off (not on a bridge).
+                    if !on_bridge {
+                        let removable = |id: u32| {
+                            id >= 1000
+                                && models[placed[((id - 1000) / 64) as usize].model]
+                                    .header
+                                    .resolved_type()
+                                    < 0x22
+                        };
+                        let opening = open_cut_off_areas(&mut grid, false, removable);
+                        removed.extend(opening.removed);
                     }
                 }
                 if let (Some(at), Ok(item)) = (selected, &item) {
@@ -481,7 +505,7 @@ async fn main() {
         // its tie rules have not yet been recovered.
         let mut draw_order: Vec<(&SceneryPart, Vec2)> = Vec::new();
         if auto {
-            for p in &placed {
+            for (k, p) in placed.iter().enumerate() {
                 if let Some(Ok(sprite)) = sprites.get(&p.model) {
                     // Project directly: a model origin may be outside stored
                     // rows even when its visible pieces intersect the field.
@@ -489,7 +513,13 @@ async fn main() {
                         590. + 16. * (p.at.1 - p.at.0) as f32,
                         512. + 8. * (p.at.0 + p.at.1 - 102) as f32,
                     );
-                    draw_order.extend(sprite.parts.iter().map(|part| (part, at)));
+                    draw_order.extend(
+                        sprite
+                            .parts
+                            .iter()
+                            .filter(|part| !removed.contains(&auto_id(k, part.segment)))
+                            .map(|part| (part, at)),
+                    );
                 }
             }
         }
@@ -534,8 +564,9 @@ async fn main() {
             "Left/Right field | Up/Down object | G grid | B bridge mode | Space pause | S shadow | Esc exit".into(),
             match &placer {
                 Ok(_) if auto => format!(
-                    "O automatic obstacles: {} (R seed {seed}, T ground {})",
+                    "O automatic obstacles: {}, {} segments cleared for passage (R seed {seed}, T ground {})",
                     placed.len(),
+                    removed.len(),
                     GROUNDS[ground].1
                 ),
                 Ok(_) => "O automatic obstacles: off".into(),
